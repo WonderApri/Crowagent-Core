@@ -38,6 +38,10 @@ def build_system_prompt(segment: str, portfolio: list) -> str:
     Returns:
         A formatted string to be used as the system prompt for the Gemini model.
     """
+    # Guard against argument swapping (legacy compatibility)
+    if isinstance(segment, list) and isinstance(portfolio, str):
+        segment, portfolio = portfolio, segment
+
     # 1. Dashboard Aggregation: Calculate totals from the portfolio.
     total_area = sum(b.get("floor_area_m2", 0) or 0 for b in portfolio)
     total_energy = sum(b.get("baseline_energy_mwh", 0) or 0 for b in portfolio)
@@ -508,7 +512,7 @@ def run_agent_turn(
     Raises RuntimeError on unrecoverable API errors.
     """
     # Build context-aware system prompt from segment and portfolio
-    system_prompt = build_system_prompt(segment, portfolio)
+    system_prompt = build_system_prompt(segment=segment, portfolio=portfolio)
 
     # Convert portfolio list to building registry dict for tool execution
     building_registry = {b["name"]: b for b in portfolio}
