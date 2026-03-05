@@ -1,3 +1,1 @@
-from .orchestrator import ESGOrchestrator
-
-__all__ = ["ESGOrchestrator"]
+# Tests package initialization

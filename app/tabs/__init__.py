@@ -1,1 +1,1 @@
-"""Tab renderers package."""
+# App Tabs Package

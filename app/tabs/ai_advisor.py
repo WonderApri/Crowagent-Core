@@ -104,14 +104,12 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
     # ── BLOCK 5: ACTIVE CHAT STATE ────────────────────────────────────────────
 
     # 5a. Get required data from session state
-    if "ai_chat_history" not in st.session_state:
-        st.session_state.ai_chat_history = []
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
     
     # Session Isolation: Initialize tracking variables
     if "last_segment" not in st.session_state:
         st.session_state.last_segment = st.session_state.get("user_segment", None)
-    if "ai_chat_history_by_segment" not in st.session_state:
-        st.session_state.ai_chat_history_by_segment = {}
 
     api_key = st.session_state.get("gemini_key", "")
     segment = st.session_state.get("user_segment", "university_he")
@@ -121,11 +119,8 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
     # Session Isolation: Check for segment change and reset if needed
     if segment != st.session_state.last_segment:
         logger.info(f"Segment changed from {st.session_state.last_segment} to {segment}. Resetting advisor chat.")
-        st.session_state.ai_chat_history = []
+        st.session_state.chat_history = []
         st.session_state.last_segment = segment
-
-    # Session Isolation: Persist messages per segment
-    st.session_state.ai_chat_history_by_segment[segment] = st.session_state.ai_chat_history
 
     # 5b. Define the two-column layout
     left_col, right_col = st.columns([1, 2.5], gap="large")
@@ -144,7 +139,7 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
                 use_container_width=True,
             ):
                 # Add starter to history and rerun to trigger agent
-                st.session_state.ai_chat_history.append({"role": "user", "content": prompt})
+                st.session_state.chat_history.append({"role": "user", "content": prompt})
                 st.rerun()
         st.info("The AI is aware of your loaded assets and current business segment.", icon="ℹ️")
 
@@ -153,12 +148,12 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
         # This container creates a scrollable, bordered frame for the chat history
         with st.container(height=500, border=True):
             # Render the chat history from session state
-            for msg in st.session_state.ai_chat_history:
+            for msg in st.session_state.chat_history:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
 
             # If the last message is from the user, run the agent
-            history = st.session_state.ai_chat_history
+            history = st.session_state.chat_history
             if history and history[-1]["role"] == "user":
                 with st.chat_message("assistant"):
                     # The spinner appears inside the container while the agent runs
@@ -214,10 +209,10 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
                     # Display the agent's response
                     st.markdown(response)
                     # Add the response to history and rerun to clear the spinner
-                    st.session_state.ai_chat_history.append({"role": "assistant", "content": response})
+                    st.session_state.chat_history.append({"role": "assistant", "content": response})
                     st.rerun()
 
         # The chat input is in the right column, but *outside* the scrollable container
         if user_input := st.chat_input("Ask about your portfolio, energy, or compliance..."):
-            st.session_state.ai_chat_history.append({"role": "user", "content": user_input})
+            st.session_state.chat_history.append({"role": "user", "content": user_input})
             st.rerun()
