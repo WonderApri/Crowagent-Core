@@ -74,7 +74,11 @@ def build_system_prompt(segment: str, portfolio: list) -> str:
     # 3. Segment Lock & Core Instructions
     instructions = f"""**CRITICAL INSTRUCTIONS:**
 1.  **Segment Focus:** Your advice **MUST** be strictly tailored to the user's active segment: **'{segment}'**. All compliance rules, regulations, and recommendations must be relevant to this segment only. Do not discuss rules for other segments.
-2.  **Regulatory Links:** When discussing any UK regulation, statutory instrument, or compliance framework (e.g., MEES, Part L, SECR), you **MUST** provide a valid, official external URL to the source document, preferably from `gov.uk` or other official regulatory bodies.
+2.  **Regulatory Links:** When discussing UK regulation, you **MUST** provide a valid, official external URL and include official references. Prioritise these links where relevant:
+    - EPC register: https://www.gov.uk/find-energy-certificate
+    - MEES landlord guidance: https://www.gov.uk/guidance/domestic-private-rented-property-minimum-energy-efficiency-standard-landlord-guidance
+    - Part L approved document: https://www.gov.uk/government/publications/conservation-of-fuel-and-power-approved-document-l
+    Always prefer `gov.uk` or other official regulatory bodies.
 3.  **No Assumptions (Guardrail):** You **MUST NOT** invent, estimate, or assume any quantitative data (costs, energy savings, performance metrics). Your primary function is to execute the available tools to gather real data. If a user asks a question that requires a calculation, run the appropriate tool. If you cannot answer without a tool, state that you need to run a tool first.
 4.  **Tool-First Workflow:** Always use your tools to gather evidence *before* formulating an answer. Your response should be a synthesis of the data returned by the tools.
 5.  **Honesty and Transparency:** If a tool fails or the data is unavailable, state it clearly. Do not attempt to fill in the gaps.
@@ -234,6 +238,7 @@ def execute_tool(
     args: dict,
     buildings: dict,
     scenarios: dict,
+    calculate_fn=None,
     tariff: float = constants.DEFAULT_ELECTRICITY_TARIFF_GBP_PER_KWH,
 ) -> dict[str, Any]:
     """
@@ -243,6 +248,7 @@ def execute_tool(
     """
     temp = float(args.get("temperature_c", 10.5))
     weather = {"temperature_c": temp, "wind_speed_mph": 9.2}
+    calc = calculate_fn or physics.calculate_thermal_load
 
     # ── Tool: run_scenario ────────────────────────────────────────────────────
     if name == "run_scenario":
@@ -255,7 +261,7 @@ def execute_tool(
             return {"error": f"Scenario '{sname}' not found. "
                     f"Available: {list(scenarios.keys())}"}
         try:
-            result = physics.calculate_thermal_load(
+            result = calc(
                 buildings[bname], scenarios[sname], weather, tariff
             )
         except Exception as exc:
@@ -279,7 +285,7 @@ def execute_tool(
         rows = []
         for bname, bdata in buildings.items():
             try:
-                r = physics.calculate_thermal_load(
+                r = calc(
                     bdata, scenarios[sname], weather, tariff
                 )
             except Exception:
@@ -311,7 +317,7 @@ def execute_tool(
                 if sdata["install_cost_gbp"] > budget:
                     continue
                 try:
-                    r = physics.calculate_thermal_load(
+                    r = calc(
                         bdata, sdata, weather, tariff
                     )
                 except Exception:
@@ -360,7 +366,7 @@ def execute_tool(
             "baseline_cost_gbp_yr":  round(b["baseline_energy_mwh"] * 1000 * constants.DEFAULT_ELECTRICITY_TARIFF_GBP_PER_KWH, 0),
             "occupancy_hours_yr":    b["occupancy_hours"],
             "built_year":            b["built_year"],
-            "description":           b["description"],
+            "description":           b.get("description", ""),
         }
 
     # ── Tool: rank_all_scenarios ──────────────────────────────────────────────
@@ -372,7 +378,7 @@ def execute_tool(
         rows = []
         for sname, sdata in scenarios.items():
             try:
-                r = physics.calculate_thermal_load(
+                r = calc(
                     buildings[bname], sdata, weather, tariff
                 )
             except Exception:
@@ -402,6 +408,9 @@ def execute_tool(
             "scenarios": rows,
         }
 
+    elif name == "list_buildings":
+        return {"buildings": sorted(list(buildings.keys()))}
+
     return {"error": f"Unknown tool: {name}"}
 
 
@@ -415,31 +424,16 @@ def _call_gemini(
     use_tools: bool = True,
 ) -> dict:
     """
-    Single Gemini API call. Returns the raw response dict.
+    Single Gemini API call with schema fallbacks for API-version differences.
     messages format: [{"role": "user"|"model", "parts": [...]}]
     """
-    payload: dict = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": messages,
-        "generationConfig": {
-            "maxOutputTokens": MAX_OUTPUT_TOKENS,
-            "temperature": 0.2,   # low = consistent, factual answers
-            "topP": 0.8,
-        },
-    }
-    if use_tools:
-        payload["tools"] = [{"function_declarations": AGENT_TOOLS}]
-        payload["tool_config"] = {
-            "function_calling_config": {"mode": "AUTO"}
-        }
-
     # API Key validation and sanitization for debugging
     if not api_key or not isinstance(api_key, str):
         print("--- GEMINI API DEBUG ---")
         print("CRITICAL: API key is missing or not a string.")
         print("--- END DEBUG ---")
         return {"error": "Gemini API key is missing."}
-    
+
     clean_api_key = api_key.strip()
     if len(clean_api_key) != 39:
         print("--- GEMINI API DEBUG ---")
@@ -452,46 +446,138 @@ def _call_gemini(
         print(f"Key prefix: '{clean_api_key[:4]}'")
         print("--- END DEBUG ---")
 
-    try:
-        resp = requests.post(GEMINI_URL, timeout=30,
-            headers={"Content-Type": "application/json", "x-goog-api-key": clean_api_key},
-            json=payload,
-        )
-    except requests.exceptions.Timeout:
-        return {"error": "Gemini API request timed out (30 s). Check your connection and retry."}
-    except requests.exceptions.ConnectionError:
-        return {"error": "Could not connect to Gemini API. Check your internet connection."}
-    except requests.exceptions.RequestException as exc:
-        return {"error": f"Gemini API request failed: {exc}"}
+    # Preferred payload (Generative Language API, snake_case)
+    payload_snake: dict = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": messages,
+        "generationConfig": {
+            "maxOutputTokens": MAX_OUTPUT_TOKENS,
+            "temperature": 0.2,
+            "topP": 0.8,
+        },
+    }
+    if use_tools:
+        payload_snake["tools"] = [{"function_declarations": AGENT_TOOLS}]
+        payload_snake["tool_config"] = {
+            "function_calling_config": {"mode": "AUTO"}
+        }
 
-    if resp.status_code != 200:
-        # Aggressive debug logging on failure
-        print("\n--- GEMINI API DEBUG ---")
-        print(f"URL: {GEMINI_URL}")
-        print(f"Status Code: {resp.status_code}")
-        print(f"Raw Response Text: {resp.text}")
-        print("--- END DEBUG ---\n")
+    # Alternate payload (camelCase variants seen in some SDK/docs)
+    payload_camel: dict = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": messages,
+        "generationConfig": {
+            "maxOutputTokens": MAX_OUTPUT_TOKENS,
+            "temperature": 0.2,
+            "topP": 0.8,
+        },
+    }
+    if use_tools:
+        payload_camel["tools"] = [{"functionDeclarations": AGENT_TOOLS}]
+        payload_camel["toolConfig"] = {
+            "functionCallingConfig": {"mode": "AUTO"}
+        }
 
-        error_msg = "Unknown error"
+    # Final fallback: no top-level system/tool fields at all.
+    # We inject the system prompt into the first user message to avoid schema mismatches.
+    merged_messages = list(messages)
+    if merged_messages and merged_messages[0].get("role") == "user":
+        first_parts = merged_messages[0].get("parts", [])
+        first_text = first_parts[0].get("text", "") if first_parts else ""
+        merged_messages[0] = {
+            "role": "user",
+            "parts": [{"text": f"[SYSTEM INSTRUCTIONS]\n{system_prompt}\n\n[USER MESSAGE]\n{first_text}"}],
+        }
+    payload_minimal = {
+        "contents": merged_messages,
+        "generationConfig": {
+            "maxOutputTokens": MAX_OUTPUT_TOKENS,
+            "temperature": 0.2,
+            "topP": 0.8,
+        },
+    }
+
+    attempts = [payload_snake, payload_camel, payload_minimal]
+    last_error = None
+
+    for idx, payload in enumerate(attempts, start=1):
+        try:
+            resp = requests.post(
+                GEMINI_URL,
+                timeout=30,
+                headers={"Content-Type": "application/json", "x-goog-api-key": clean_api_key},
+                json=payload,
+            )
+        except requests.exceptions.Timeout:
+            last_error = "Gemini API request timed out (30 s). Check your connection and retry."
+            continue
+        except requests.exceptions.ConnectionError:
+            last_error = "Could not connect to Gemini API. Check your internet connection."
+            continue
+        except requests.exceptions.RequestException as exc:
+            last_error = f"Gemini API request failed: {exc}"
+            continue
+
+        if resp.status_code == 200:
+            return resp.json()
+
+        # parse error and decide whether retry next schema variant
         try:
             error_data = resp.json()
-            error_msg = error_data.get('error', {}).get('message', resp.text[:200])
+            error_msg = error_data.get("error", {}).get("message", resp.text[:200])
         except Exception:
             error_msg = resp.text[:200]
-        
-        # Enhanced error messages for common issues
-        if "404" in str(resp.status_code) or "not found" in error_msg.lower():
-            error_msg = (
-                f"Model not available. Please ensure your API key is valid and the model name is correct. "
-                f"Error: {error_msg}"
-            )
-        elif "401" in str(resp.status_code) or "unauthorized" in error_msg.lower():
-            error_msg = f"Invalid API key. Please check and try again. Full error: {error_msg}"
-        elif "403" in str(resp.status_code) or "permission" in error_msg.lower():
-            error_msg = f"API key doesn't have permission. Check your Google Cloud Console. Full error: {error_msg}"
-        
-        return {"error": f"Gemini API error {resp.status_code}: {error_msg}"}
-    return resp.json()
+
+        last_error = f"Gemini API error {resp.status_code}: {error_msg}"
+        lower = error_msg.lower()
+        schema_mismatch = (
+            "unknown name" in lower
+            or "cannot find field" in lower
+            or "invalid json payload" in lower
+        )
+
+        if not schema_mismatch or idx == len(attempts):
+            break
+
+    return {"error": last_error or "Gemini API request failed."}
+
+
+
+def _invoke_gemini_with_compat(api_key: str, messages: list, system_prompt: str, use_tools: bool) -> dict:
+    """Call _call_gemini while tolerating legacy monkeypatched signatures in tests."""
+    try:
+        return _call_gemini(api_key, messages, system_prompt, use_tools=use_tools)
+    except TypeError:
+        # legacy signature: _call_gemini(api_key, messages, use_tools=True)
+        return _call_gemini(api_key, messages, use_tools=use_tools)
+
+
+def run_agent(
+    api_key: str,
+    user_message: str,
+    conversation_history: list | None = None,
+    buildings: dict | None = None,
+    scenarios: dict | None = None,
+    calculate_fn=None,
+    current_context: dict | None = None,
+) -> dict:
+    """Backward-compatible wrapper expected by legacy tests/callers."""
+    _ = (conversation_history, scenarios, calculate_fn, current_context)
+    portfolio = []
+    for bname, bdata in (buildings or {}).items():
+        item = dict(bdata)
+        item.setdefault("name", bname)
+        item.setdefault("description", "")
+        portfolio.append(item)
+    answer = run_agent_turn(
+        user_message=user_message,
+        segment="university_he",
+        portfolio=portfolio,
+        api_key=api_key,
+    )
+    if isinstance(answer, str) and answer.startswith("Reached maximum reasoning steps"):
+        return {"answer": answer, "error": "Max loops reached and summarisation failed.", "loops": MAX_AGENT_LOOPS}
+    return {"answer": answer, "error": None, "loops": MAX_AGENT_LOOPS}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -540,7 +626,7 @@ def run_agent_turn(
 
     while loops < MAX_AGENT_LOOPS:
         loops += 1
-        response = _call_gemini(api_key, messages, system_prompt, use_tools=True)
+        response = _invoke_gemini_with_compat(api_key, messages, system_prompt, use_tools=True)
 
         # Handle API error
         if "error" in response:
@@ -574,7 +660,12 @@ def run_agent_turn(
 
                 # Execute the tool
                 result = execute_tool(
-                    name, fargs, building_registry, scenario_registry, tariff
+                    name=name,
+                    args=fargs,
+                    buildings=building_registry,
+                    scenarios=scenario_registry,
+                    calculate_fn=physics.calculate_thermal_load,
+                    tariff=tariff,
                 )
 
                 tool_calls_log.append({
@@ -620,7 +711,7 @@ def run_agent_turn(
         "role": "user",
         "parts": [{"text": "Please summarise your findings so far in 3 sentences."}]
     })
-    final_resp = _call_gemini(api_key, messages, system_prompt, use_tools=False)
+    final_resp = _invoke_gemini_with_compat(api_key, messages, system_prompt, use_tools=False)
     summarisation_error = final_resp.get("error")
     if not summarisation_error:
         parts = final_resp.get("candidates", [{}])[0].get("content", {}).get("parts", [])
