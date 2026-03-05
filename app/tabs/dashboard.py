@@ -141,10 +141,13 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
     
     # --- Profile Switcher UI ---
     with st.container(border=True):
-        c1, c2 = st.columns([3, 1.2])
+        c1, c2, c3 = st.columns([3, 1.2, 1.2])
         c1.markdown(f"Current Profile: **{handler.display_label}**")
         if c2.button("🔁 Switch Profile", use_container_width=True):
             st.session_state.show_switch_profile_dialog = True
+            st.rerun()
+        if c3.button("🏠 Home", use_container_width=True):
+            st.session_state.user_segment = None
             st.rerun()
 
     # 1. Filter portfolio for this segment

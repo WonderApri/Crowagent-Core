@@ -27,106 +27,65 @@ GEMINI_URL           = "https://generativelanguage.googleapis.com/v1/models/gemi
 MAX_OUTPUT_TOKENS    = 2000
 MAX_AGENT_LOOPS      = 10
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DYNAMIC SYSTEM PROMPT
-# ─────────────────────────────────────────────────────────────────────────────
-REGULATORY_CONTEXT = {
-    "university_he": (
-        "SECR (Streamlined Energy & Carbon Reporting), "
-        "MEES (Minimum Energy Efficiency Standards), "
-        "Display Energy Certificates (DECs)"
-    ),
-    "smb_landlord": (
-        "MEES 2025 and 2028 compliance thresholds, "
-        "EPC Band C targets, Domestic Minimum Standard"
-    ),
-    "smb_industrial": (
-        "SECR Scope 1 and Scope 2 carbon reporting, "
-        "ISO 50001 energy management framework"
-    ),
-    "individual_selfbuild": (
-        "Part L 2021 (Conservation of Fuel and Power), "
-        "SAP/BREDEM energy modelling, Future Homes Standard"
-    ),
-}
+def build_system_prompt(portfolio: list, segment: str) -> str:
+    """
+    Builds a dynamic, context-aware system prompt for the AI Advisor.
 
+    Args:
+        segment: The active user segment (e.g., 'university_he').
+        portfolio: A list of building data dictionaries.
 
-def build_system_prompt(segment: str, portfolio: list) -> str:
-    """Builds a dynamic system prompt tailored to the user segment and portfolio."""
+    Returns:
+        A formatted string to be used as the system prompt for the Gemini model.
+    """
+    # 1. Dashboard Aggregation: Calculate totals from the portfolio.
+    total_area = sum(b.get("floor_area_m2", 0) for b in portfolio)
+    total_energy = sum(b.get("baseline_energy_mwh", 0) for b in portfolio)
 
-    # Persona-specific instructions
-    SEGMENT_PERSONAS = {
-        "university_he": (
-            "Speak to the user as a professional estates & facilities consultant. "
-            "Focus on compliance, large-scale capex projects, and portfolio-level "
-            "metrics. Use formal language."
-        ),
-        "smb_landlord": (
-            "Address the user as a savvy property portfolio manager. Emphasise "
-            "regulatory risk (MEES), tenant comfort, and ROI on retrofits. "
-            "Keep advice practical and cost-focused."
-        ),
-        "smb_industrial": (
-            "Engage the user as an industrial efficiency expert. Focus on SECR "
-            "reporting, operational cost savings (OpEx), and energy management "
-            "systems like ISO 50001. Use precise, technical language."
-        ),
-        "individual_selfbuild": (
-            "Talk to the user as a helpful, encouraging technical guide for their "
-            "self-build project. Explain complex topics like Part L simply. "
-            "Focus on achieving their vision sustainably and cost-effectively."
-        ),
-    }
-
-    reg_context = REGULATORY_CONTEXT.get(
-        segment, REGULATORY_CONTEXT["university_he"]
-    )
-    persona_prompt = SEGMENT_PERSONAS.get(segment, SEGMENT_PERSONAS["university_he"])
-
-    portfolio_lines = []
-    for b in portfolio:
-        name   = b.get("name", "Unknown")
-        btype  = b.get("type", "Unknown")
-        area   = b.get("floor_area_m2", "N/A")
-        energy = b.get("baseline_energy_mwh", "N/A")
-        portfolio_lines.append(
-            f"  - {name} | Type: {btype} | "
-            f"Area: {area} m² | Baseline: {energy} MWh/yr"
+    if portfolio:
+        building_list = []
+        for b in portfolio:
+            name = b.get("name", "Unnamed Asset")
+            area = b.get("floor_area_m2", "N/A")
+            energy = b.get("baseline_energy_mwh", "N/A")
+            building_list.append(
+                f"- **{name}**: {area:,} m², {energy:,} MWh/yr"
+            )
+        portfolio_summary = (
+            "**Portfolio Summary:**\n"
+            f"- **Total Buildings:** {len(portfolio)}\n"
+            f"- **Total Floor Area:** {total_area:,.0f} m²\n"
+            f"- **Total Baseline Energy:** {total_energy:,.0f} MWh/yr\n\n"
+            "**Building List:**\n" + "\n".join(building_list)
         )
-    portfolio_block = (
-        "\n".join(portfolio_lines)
-        if portfolio_lines
-        else "  No assets currently loaded."
-    )
+    else:
+        portfolio_summary = "**Portfolio Summary:**\n- No assets have been loaded. The portfolio is empty."
+
+    # 2. Capabilities Awareness: Define what the AI can do.
+    capabilities = """- **Dashboard Summary:** Synthesise portfolio data to provide a high-level overview of energy, and area.
+- **Compliance Analysis:** Identify and explain regulatory compliance gaps (e.g., MEES, SECR) based on the user's specific business segment.
+- **Financial ROI:** Calculate and compare the return on investment, payback periods, and cost-effectiveness of various retrofit scenarios.
+- **Thermal Physics Modelling:** Use the integrated physics engine to run detailed thermal simulations for specific buildings and interventions."""
+
+    # 3. Segment Lock & Core Instructions
+    instructions = f"""**CRITICAL INSTRUCTIONS:**
+1.  **Segment Focus:** Your advice **MUST** be strictly tailored to the user's active segment: **'{segment}'**. All compliance rules, regulations, and recommendations must be relevant to this segment only. Do not discuss rules for other segments.
+2.  **Regulatory Links:** When discussing any UK regulation, statutory instrument, or compliance framework (e.g., MEES, Part L, SECR), you **MUST** provide a valid, official external URL to the source document, preferably from `gov.uk` or other official regulatory bodies.
+3.  **No Assumptions (Guardrail):** You **MUST NOT** invent, estimate, or assume any quantitative data (costs, energy savings, performance metrics). Your primary function is to execute the available tools to gather real data. If a user asks a question that requires a calculation, run the appropriate tool. If you cannot answer without a tool, state that you need to run a tool first.
+4.  **Tool-First Workflow:** Always use your tools to gather evidence *before* formulating an answer. Your response should be a synthesis of the data returned by the tools.
+5.  **Honesty and Transparency:** If a tool fails or the data is unavailable, state it clearly. Do not attempt to fill in the gaps.
+"""
 
     # Combine all parts into the final system prompt
     return (
-        f"You are CrowAgent™ AI Advisor, a world-class, physics-informed "
-        f"sustainability consultant for the UK built environment.\n\n"
-        f"## Persona\n{persona_prompt}\n\n"
-        f"## Context\n"
-        f"- **Active User Segment:** {segment}\n"
-        f"- **Applicable Regulations:** {reg_context}\n"
-        f"- **Active Portfolio:**\n{portfolio_block}\n\n"
-        f"## Output Formatting\n"
-        f"- **Structure:** Start with a concise summary (`## Summary`), "
-        f"followed by detailed findings (`## Analysis`), and end with clear, "
-        f"actionable advice (`## Recommendations`).\n"
-        f"- **Clarity:** Use Markdown for headings, lists, and tables to present "
-        f"data clearly. Use **bold** for key terms and metrics.\n"
-        f"- **Data:** When presenting tool results, use tables for easy comparison.\n\n"
-        f"## Core Instructions\n"
-        f"1.  **Golden Rule:** For any query, first run all necessary tools to "
-        f"gather evidence. Then, synthesise the findings into a coherent "
-        f"response following the specified format.\n"
-        f"2.  **Tool First:** Always execute tools to get real data before "
-        f"answering. Do not estimate what can be computed.\n"
-        f"3.  **Cite Your Work:** Explicitly reference the tool outputs that "
-        f"support your analysis (e.g., 'The `run_scenario` tool shows...').\n"
-        f"4.  **Honesty:** Never fabricate or invent data. If a tool fails or "
-        f"doesn't provide the answer, state that clearly.\n"
-        f"5.  **Disclaimer:** All outputs are indicative. Always conclude by "
-        f"recommending professional verification for critical decisions."
+        "You are CrowAgent™, a world-class, physics-informed AI sustainability consultant for the UK built environment.\n\n"
+        "## User Context\n"
+        f"The user is operating in the **'{segment}'** segment. Your advice and analysis must be strictly confined to the regulations and commercial drivers of this sector.\n\n"
+        f"## Portfolio Snapshot\n{portfolio_summary}\n\n"
+        "## AI Capabilities\n"
+        "You have the following capabilities:\n"
+        f"{capabilities}\n\n"
+        f"{instructions}"
     )
 
 # ─────────────────────────────────────────────────────────────────────────────

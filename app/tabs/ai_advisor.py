@@ -75,89 +75,83 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
         icon=None,
     )
 
-    # ── BLOCK 3: BRANCHING GATE ───────────────────────────────────────────────
-    api_key = st.session_state.get("gemini_key", "").strip()
-
-    if not api_key:
+    # ── BLOCK 3: PRIMARY GATE ─────────────────────────────────────────────────
+    # The AI advisor is locked until a valid Gemini API key is activated in settings.
+    if not st.session_state.get("GEMINI_API_KEY_ACTIVATED", False):
         # ── BLOCK 4: LOCKED STATE ─────────────────────────────────────────────
         with st.container(border=True):
             st.markdown("### 🔑 Activate AI Advisor with a free Gemini API key")
             st.markdown("""
-1. Visit [aistudio.google.com](https://aistudio.google.com)
-2. Sign in with any Google account
-3. Click **Get API key** → **Create API key**
-4. Paste it into **API Keys** in the sidebar
+1. Visit [aistudio.google.com](https://aistudio.google.com) and sign in.
+2. Click **Get API key** → **Create API key in new project**.
+3. Copy the generated key.
+4. Paste it into the **API Keys** section in the **Settings** tab.
 """)
-            st.caption("Free tier · 1,500 requests/day · No credit card required")
-            st.caption("CrowAgent™ Platform")
-        return
-
-    # Validate the key format
-    is_valid, message = validate_gemini_key(api_key)
-    if not is_valid:
-        st.error(f"**API Key Error:** {message}", icon="🔑")
-        st.info("Please update the key in the sidebar under 'API Keys'.")
+            st.caption("Free tier · 1,500 requests/day · No credit card required.")
+            st.image("assets/CrowAgent_Logo_Horizontal_Dark.svg", width=200)
         return
 
     # ── BLOCK 5: ACTIVE CHAT STATE ────────────────────────────────────────────
 
-    # 5a. SESSION INIT
+    # 5a. Get required data from session state
     st.session_state.setdefault("ai_chat_history", [])
+    api_key = st.session_state.get("gemini_key", "")
     segment = st.session_state.get("user_segment", "university_he")
+    segment_name = st.session_state.get("current_segment_name", "University / Higher Education")
     portfolio = st.session_state.get("portfolio", [])
 
-    # 5b. WELCOME BANNER
-    st.info(
-        "Welcome to your AI Advisor. I am connected to your active "
-        "property portfolio and ready to run thermal load simulations, "
-        "analyze ROI, and check regulatory compliance."
-    )
+    # 5b. Define the two-column layout
+    left_col, right_col = st.columns([1, 2.5], gap="large")
 
-    # 5c. STARTER PROMPTS
-    prompts = STARTER_PROMPTS.get(segment, STARTER_PROMPTS["university_he"])
-    st.markdown("**Suggested Queries for your Portfolio:**")
-    for prompt in prompts:
-        if st.button(
-            prompt,
-            key=f"starter_{prompt[:30]}",
-            use_container_width=True,
-        ):
-            st.session_state.ai_chat_history.append(
-                {"role": "user", "content": prompt}
-            )
+    # 5c. LEFT COLUMN: Context and starter prompts
+    with left_col:
+        st.markdown(f"**Segment:**\n`{segment_name}`")
+        st.markdown(f"**Active Assets:**\n`{len(portfolio)}`")
+        st.markdown("---")
+        st.markdown("**Suggested Queries:**")
+        prompts = STARTER_PROMPTS.get(segment, STARTER_PROMPTS["university_he"])
+        for prompt in prompts:
+            if st.button(
+                prompt,
+                key=f"starter_{prompt[:30]}",
+                use_container_width=True,
+            ):
+                # Add starter to history and rerun to trigger agent
+                st.session_state.ai_chat_history.append({"role": "user", "content": prompt})
+                st.rerun()
+        st.info("The AI is aware of your loaded assets and current business segment.", icon="ℹ️")
+
+    # 5d. RIGHT COLUMN: Chat interface sub-frame
+    with right_col:
+        # This container creates a scrollable, bordered frame for the chat history
+        with st.container(height=500, border=True):
+            # Render the chat history from session state
+            for msg in st.session_state.ai_chat_history:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+
+            # If the last message is from the user, run the agent
+            history = st.session_state.ai_chat_history
+            if history and history[-1]["role"] == "user":
+                with st.chat_message("assistant"):
+                    # The spinner appears inside the container while the agent runs
+                    with st.spinner("Thinking..."):
+                        try:
+                            response = run_agent_turn(
+                                user_message=history[-1]["content"],
+                                segment=segment,
+                                portfolio=portfolio,
+                                api_key=api_key,
+                            )
+                        except RuntimeError as e:
+                            response = f"An error occurred while running the agent. \n\n**Error details:**\n`{e}`"
+                    # Display the agent's response
+                    st.markdown(response)
+                    # Add the response to history and rerun to clear the spinner
+                    st.session_state.ai_chat_history.append({"role": "assistant", "content": response})
+                    st.rerun()
+
+        # The chat input is in the right column, but *outside* the scrollable container
+        if user_input := st.chat_input("Ask about your portfolio, energy, or compliance..."):
+            st.session_state.ai_chat_history.append({"role": "user", "content": user_input})
             st.rerun()
-
-    # 5d. CHAT HISTORY DISPLAY
-    for msg in st.session_state.ai_chat_history:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    # 5e. PENDING RESPONSE HANDLER
-    history = st.session_state.ai_chat_history
-    if history and history[-1]["role"] == "user":
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    response = run_agent_turn(
-                        user_message=history[-1]["content"],
-                        segment=segment,
-                        portfolio=portfolio,
-                        api_key=api_key,
-                    )
-                except RuntimeError as e:
-                    response = f"An error occurred while trying to answer your question. \n\n**Error details:**\n`{e}`"
-
-            st.markdown(response)
-            st.session_state.ai_chat_history.append(
-                {"role": "assistant", "content": response}
-            )
-            st.rerun()
-
-    # 5f. CHAT INPUT
-    if user_input := st.chat_input(
-        "Ask about your portfolio, energy expenses, or compliance..."
-    ):
-        st.session_state.ai_chat_history.append(
-            {"role": "user", "content": user_input}
-        )
-        st.rerun()
