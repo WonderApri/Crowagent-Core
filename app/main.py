@@ -10,16 +10,17 @@ Navigation architecture: in-content horizontal button bar
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
 import logging
 import os
 import sys
 
 import streamlit as st
-
-# ── Project root on sys.path ─────────────────────────────────────────────────
-_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
 
 import app.branding as branding
 import app.session as session
