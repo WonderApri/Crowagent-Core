@@ -145,3 +145,16 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
     # 5e. PENDING RESPONSE HANDLER
     history = st.session_state.ai_chat_history
     if history and history[-1]["role"] == "user":
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = run_agent_turn(
+                    api_key=api_key,
+                    history=history,
+                    portfolio=portfolio,
+                    weather=weather,
+                )
+                st.markdown(response)
+        st.session_state.ai_chat_history.append(
+            {"role": "assistant", "content": response}
+        )
+        st.rerun()
