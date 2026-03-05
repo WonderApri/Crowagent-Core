@@ -11,9 +11,12 @@ import streamlit as st
 
 try:
     from app.branding import COLOURS, FONTS
+    from app.utils import validate_gemini_key
 except ImportError:
     COLOURS: dict = {}
     FONTS: dict = {}
+    def validate_gemini_key(key: str) -> tuple[bool, str]:
+        return True, ""
 
 from core.agent import run_agent_turn
 
@@ -89,6 +92,13 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
             st.caption("CrowAgent™ Platform")
         return
 
+    # Validate the key format
+    is_valid, message = validate_gemini_key(api_key)
+    if not is_valid:
+        st.error(f"**API Key Error:** {message}", icon="🔑")
+        st.info("Please update the key in the sidebar under 'API Keys'.")
+        return
+
     # ── BLOCK 5: ACTIVE CHAT STATE ────────────────────────────────────────────
 
     # 5a. SESSION INIT
@@ -103,20 +113,29 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
         "analyze ROI, and check regulatory compliance."
     )
 
-    # 5c. STARTER PROMPTS (only shown when chat history is empty)
-    if len(st.session_state.ai_chat_history) == 0:
-        prompts = STARTER_PROMPTS.get(segment, STARTER_PROMPTS["university_he"])
-        st.markdown("**Suggested Queries for your Portfolio:**")
-        for prompt in prompts:
-            if st.button(
-                prompt,
-                key=f"starter_{prompt[:30]}",
-                use_container_width=True,
-            ):
-                st.session_state.ai_chat_history.append(
-                    {"role": "user", "content": prompt}
-                )
-                st.rerun()
+    # 5c. STARTER PROMPTS (always shown)
+    prompts = STARTER_PROMPTS.get(segment, STARTER_PROMPTS["university_he"])
+    st.markdown("**Suggested Queries for your Portfolio:**")
+    for prompt in prompts:
+        if st.button(
+            prompt,
+            key=f"starter_{prompt[:30]}",
+            use_container_width=True,
+        ):
+            st.session_state.ai_chat_history.append(
+                {"role": "user", "content": prompt}
+            )
+            st.rerun()
+
+    # 5f. CHAT INPUT (moved up)
+    user_input = st.chat_input(
+        "Ask about your portfolio, energy expenses, or compliance..."
+    )
+    if user_input:
+        st.session_state.ai_chat_history.append(
+            {"role": "user", "content": user_input}
+        )
+        st.rerun()
 
     # 5d. CHAT HISTORY DISPLAY
     for msg in st.session_state.ai_chat_history:
@@ -126,61 +145,3 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
     # 5e. PENDING RESPONSE HANDLER
     history = st.session_state.ai_chat_history
     if history and history[-1]["role"] == "user":
-        with st.status("⚙️ Analysing your portfolio...", expanded=True) as status:
-            try:
-                response = run_agent_turn(
-                    user_message=history[-1]["content"],
-                    segment=segment,
-                    portfolio=portfolio,
-                    api_key=api_key,
-                    status_widget=status,
-                )
-                status.update(
-                    label="✅ Analysis complete",
-                    state="complete",
-                    expanded=False,
-                )
-                st.session_state.ai_chat_history.append(
-                    {"role": "assistant", "content": response}
-                )
-                st.rerun()
-            except Exception as e:
-                err = str(e).lower()
-                if "429" in err:
-                    msg = (
-                        "Gemini API rate limit reached. "
-                        "Please wait 60 seconds and try again."
-                    )
-                elif "401" in err or "invalid" in err or "api key" in err:
-                    msg = (
-                        "Invalid API key detected. "
-                        "Please verify your key in Settings."
-                    )
-                elif "timeout" in err:
-                    msg = (
-                        "Request timed out. "
-                        "Please check your connection and retry."
-                    )
-                else:
-                    msg = (
-                        "AI Advisor encountered an unexpected error. "
-                        "Please retry in a moment."
-                    )
-                status.update(
-                    label="❌ Error occurred",
-                    state="error",
-                    expanded=False,
-                )
-                st.warning(msg)
-                st.session_state.ai_chat_history.pop()
-                # ↑ remove unanswered user message to prevent infinite retry loop
-    
-    # 5f. CHAT INPUT
-    user_input = st.chat_input(
-        "Ask about your portfolio, energy expenses, or compliance..."
-    )
-    if user_input:
-        st.session_state.ai_chat_history.append(
-            {"role": "user", "content": user_input}
-        )
-        st.rerun()

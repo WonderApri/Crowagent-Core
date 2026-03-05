@@ -53,7 +53,7 @@ def validate_gemini_key(key: str) -> tuple[bool, str]:
     Hardening measures:
     1. Strips leading/trailing whitespace to prevent injection attacks.
     2. Explicitly forbids newline and null characters.
-    3. Matches the key against a strict regex for the expected format.
+    3. Checks format components (prefix, length, characters) individually.
 
     Returns
     -------
@@ -74,8 +74,14 @@ def validate_gemini_key(key: str) -> tuple[bool, str]:
     if "\x00" in key:
         return False, "Key contains invalid null bytes."
 
+    if not key.startswith("AIza"):
+        return False, "Invalid Format: Your key does not start with the required 'AIza' prefix."
+
+    if len(key) != 39:
+        return False, f"Invalid Length: The key must be 39 characters long, but yours has {len(key)}."
+
     if not GEMINI_API_KEY_RE.match(key):
-        return False, "Invalid format. A Gemini API key starts with 'AIza' and has 39 characters."
+        return False, "Invalid Characters: The key contains characters that are not allowed."
 
     # Placeholder for a live, lightweight check if one becomes available.
     # For now, format validation is the primary client-side check.
