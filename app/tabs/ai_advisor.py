@@ -77,7 +77,11 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
 
     # ── BLOCK 3: PRIMARY GATE ─────────────────────────────────────────────────
     # The AI advisor is locked until a valid Gemini API key is activated in settings.
-    if not st.session_state.get("GEMINI_API_KEY_ACTIVATED", False):
+    # Check both the activation flag and raw key presence to prevent lockout
+    _key = st.session_state.get("gemini_key", "")
+    _looks_valid = isinstance(_key, str) and _key.strip().startswith("AIza")
+
+    if not st.session_state.get("GEMINI_API_KEY_ACTIVATED", False) and not _looks_valid:
         # ── BLOCK 4: LOCKED STATE ─────────────────────────────────────────────
         with st.container(border=True):
             st.markdown("### 🔑 Activate AI Advisor with a free Gemini API key")

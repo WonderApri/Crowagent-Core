@@ -95,7 +95,10 @@ def validate_gemini_key(key: str) -> tuple[bool, str]:
         )
         if resp.status_code == 200:
             return True, "API key is valid and functional."
-        elif resp.status_code == 401:
+        
+        print(f"--- GEMINI VALIDATION DEBUG ---\nStatus: {resp.status_code}\nResponse: {resp.text}\n-------------------------------")
+
+        if resp.status_code in (400, 401, 403):
             return False, "Invalid API Key: The provided key is not authorized. Please check the key and try again."
         else:
             return False, f"API key validation failed with status {resp.status_code}. Please ensure it is correct and has the necessary permissions."
