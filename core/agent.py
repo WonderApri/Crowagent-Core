@@ -423,7 +423,7 @@ def _call_gemini(
     messages format: [{"role": "user"|"model", "parts": [...]}]
     """
     payload: dict = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": messages,
         "generationConfig": {
             "maxOutputTokens": MAX_OUTPUT_TOKENS,
@@ -432,9 +432,9 @@ def _call_gemini(
         },
     }
     if use_tools:
-        payload["tools"] = [{"function_declarations": AGENT_TOOLS}]
-        payload["tool_config"] = {
-            "function_calling_config": {"mode": "AUTO"}
+        payload["tools"] = [{"functionDeclarations": AGENT_TOOLS}]
+        payload["toolConfig"] = {
+            "functionCallingConfig": {"mode": "AUTO"}
         }
 
     # API Key validation and sanitization for debugging
