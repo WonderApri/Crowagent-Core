@@ -148,10 +148,10 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 response = run_agent_turn(
-                    api_key=api_key,
-                    history=history,
+                    user_message=history[-1]["content"],
+                    segment=segment,
                     portfolio=portfolio,
-                    weather=weather,
+                    api_key=api_key,
                 )
                 st.markdown(response)
         st.session_state.ai_chat_history.append(
