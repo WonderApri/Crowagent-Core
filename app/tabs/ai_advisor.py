@@ -8,8 +8,11 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
+import logging
 
 try:
+    import concurrent.futures
+    import json
     from app.branding import COLOURS, FONTS
     from app.utils import validate_gemini_key
 except ImportError:
@@ -19,6 +22,9 @@ except ImportError:
         return True, ""
 
 from core.agent import run_agent_turn
+from core.agents.orchestrator import ESGOrchestrator
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STARTER PROMPTS — segment-specific suggested queries
@@ -98,11 +104,28 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
     # ── BLOCK 5: ACTIVE CHAT STATE ────────────────────────────────────────────
 
     # 5a. Get required data from session state
-    st.session_state.setdefault("ai_chat_history", [])
+    if "ai_chat_history" not in st.session_state:
+        st.session_state.ai_chat_history = []
+    
+    # Session Isolation: Initialize tracking variables
+    if "last_segment" not in st.session_state:
+        st.session_state.last_segment = st.session_state.get("user_segment", None)
+    if "ai_chat_history_by_segment" not in st.session_state:
+        st.session_state.ai_chat_history_by_segment = {}
+
     api_key = st.session_state.get("gemini_key", "")
     segment = st.session_state.get("user_segment", "university_he")
     segment_name = st.session_state.get("current_segment_name", "University / Higher Education")
     portfolio = st.session_state.get("portfolio", [])
+
+    # Session Isolation: Check for segment change and reset if needed
+    if segment != st.session_state.last_segment:
+        logger.info(f"Segment changed from {st.session_state.last_segment} to {segment}. Resetting advisor chat.")
+        st.session_state.ai_chat_history = []
+        st.session_state.last_segment = segment
+
+    # Session Isolation: Persist messages per segment
+    st.session_state.ai_chat_history_by_segment[segment] = st.session_state.ai_chat_history
 
     # 5b. Define the two-column layout
     left_col, right_col = st.columns([1, 2.5], gap="large")
@@ -139,16 +162,55 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
             if history and history[-1]["role"] == "user":
                 with st.chat_message("assistant"):
                     # The spinner appears inside the container while the agent runs
-                    with st.spinner("Thinking..."):
+                    with st.spinner("Analyzing portfolio..."):
                         try:
-                            response = run_agent_turn(
-                                user_message=history[-1]["content"],
-                                segment=segment,
-                                portfolio=portfolio,
-                                api_key=api_key,
-                            )
+                            # 1. Safety Check: API Key
+                            if not api_key:
+                                st.warning("⚠️ AI Advisor is in offline mode. Please configure your Gemini API Key to receive portfolio insights.")
+                                st.stop()
+
+                            # 2. Safety Check: Portfolio
+                            if not portfolio:
+                                st.error("Portfolio is empty. Please add assets to run analysis.")
+                                st.stop()
+
+                            # 3. Orchestrator Call
+                            # We wrap the orchestrator and agent call in a thread pool as requested
+                            def _process_advisor_request():
+                                # a) Run Orchestrator
+                                orch = ESGOrchestrator()
+                                # Wrap list in dict as expected by orchestrator
+                                orch_input = {"assets": portfolio}
+                                analysis = orch.run(orch_input, segment)
+                                
+                                # b) Build deterministic prompt with analysis
+                                analysis_str = json.dumps(analysis, default=str)
+                                if len(analysis_str) > 10000:
+                                    analysis_str = analysis_str[:10000] + "...(truncated)"
+                                
+                                augmented_message = (
+                                    f"{history[-1]['content']}\n\n"
+                                    f"[SYSTEM INJECTED ANALYSIS]:\n{analysis_str}\n\n"
+                                    "Please use the above analysis to answer the user's question."
+                                )
+
+                                # c) Call Gemini
+                                return run_agent_turn(
+                                    user_message=augmented_message,
+                                    segment=segment,
+                                    portfolio=portfolio,
+                                    api_key=api_key,
+                                )
+
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                future = executor.submit(_process_advisor_request)
+                                response = future.result()
+
                         except RuntimeError as e:
                             response = f"An error occurred while running the agent. \n\n**Error details:**\n`{e}`"
+                        except Exception as e:
+                            response = f"An unexpected error occurred. \n\n**Error details:**\n`{e}`"
+
                     # Display the agent's response
                     st.markdown(response)
                     # Add the response to history and rerun to clear the spinner
