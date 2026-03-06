@@ -23,11 +23,21 @@ from config.scenarios import SCENARIOS
 # ─────────────────────────────────────────────────────────────────────────────
 # API & MODEL CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
-GEMINI_URL           = "https://generativelanguage.googleapis.com/v1/models/gemini-flash-latest:generateContent"
-GEMINI_FALLBACK_URLS = [
-    GEMINI_URL,
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
+GEMINI_BASE_URL      = "https://generativelanguage.googleapis.com/v1/models"
+# Ordered by preference: stable GA first, then preview aliases for compatibility.
+GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+    "gemini-pro-latest",
 ]
+GEMINI_FALLBACK_URLS = [
+    f"{GEMINI_BASE_URL}/{model}:generateContent" for model in GEMINI_MODELS
+]
+GEMINI_URL           = GEMINI_FALLBACK_URLS[0]
 MAX_OUTPUT_TOKENS    = 2000
 MAX_AGENT_LOOPS      = 10
 
