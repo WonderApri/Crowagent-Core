@@ -203,6 +203,7 @@ def _render_segment_gate() -> None:
                 st.caption(descriptions.get(seg_id, ""))
                 if st.button("Select Profile", key=f"seg_{seg_id}", use_container_width=True, type="primary"):
                     st.session_state["user_segment"] = seg_id
+                    st.session_state["current_segment_name"] = label
                     st.session_state["portfolio"] = []
                     st.rerun()
 
