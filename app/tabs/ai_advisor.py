@@ -8,14 +8,23 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
+import logging
 
 try:
+    import concurrent.futures
+    import json
     from app.branding import COLOURS, FONTS
+    from app.utils import validate_gemini_key
 except ImportError:
     COLOURS: dict = {}
     FONTS: dict = {}
+    def validate_gemini_key(key: str) -> tuple[bool, str]:
+        return True, ""
 
 from core.agent import run_agent_turn
+from core.orchestrator import ESGOrchestrator
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STARTER PROMPTS — segment-specific suggested queries
@@ -47,6 +56,28 @@ STARTER_PROMPTS = {
 def render(handler, weather: dict, portfolio: list[dict]) -> None:
     """Renders the AI Advisor tab."""
 
+    # Segment reset guard: if user segment changed, clear advisor histories immediately.
+    current_segment = st.session_state.get("user_segment", "university_he")
+    last_segment = st.session_state.get(
+        "last_advisor_segment",
+        st.session_state.get("last_segment", current_segment),
+    )
+    if last_segment != current_segment:
+        st.session_state["ai_chat_history"] = []
+        st.session_state["agent_history"] = []
+        st.session_state["chat_history"] = []
+        st.session_state.setdefault("ai_chat_history_by_segment", {})[current_segment] = []
+    st.session_state["last_advisor_segment"] = current_segment
+    st.session_state["last_segment"] = current_segment
+
+    # Legacy/session compatibility keys must exist even in locked mode
+    if "ai_chat_history" not in st.session_state:
+        st.session_state["ai_chat_history"] = st.session_state.get("chat_history", [])
+    if "chat_history" not in st.session_state:
+        st.session_state["chat_history"] = st.session_state.get("ai_chat_history", [])
+    if "ai_chat_history_by_segment" not in st.session_state:
+        st.session_state["ai_chat_history_by_segment"] = {}
+
     # ── BLOCK 1: PAGE HEADER ──────────────────────────────────────────────────
     st.markdown("## 🤖 CrowAgent™ AI Advisor")
     st.markdown(
@@ -72,115 +103,153 @@ def render(handler, weather: dict, portfolio: list[dict]) -> None:
         icon=None,
     )
 
-    # ── BLOCK 3: BRANCHING GATE ───────────────────────────────────────────────
-    api_key = st.session_state.get("gemini_key", "").strip()
+    # ── BLOCK 3: PRIMARY GATE ─────────────────────────────────────────────────
+    # The AI advisor is locked until a valid Gemini API key is activated in settings.
+    # Check both the activation flag and raw key presence to prevent lockout
+    _key = st.session_state.get("gemini_key", "")
+    _looks_valid = isinstance(_key, str) and _key.strip().startswith("AIza")
 
-    if not api_key:
+    if not st.session_state.get("GEMINI_API_KEY_ACTIVATED", False) and not _looks_valid:
         # ── BLOCK 4: LOCKED STATE ─────────────────────────────────────────────
         with st.container(border=True):
             st.markdown("### 🔑 Activate AI Advisor with a free Gemini API key")
             st.markdown("""
-1. Visit [aistudio.google.com](https://aistudio.google.com)
-2. Sign in with any Google account
-3. Click **Get API key** → **Create API key**
-4. Paste it into **API Keys** in the sidebar
+1. Visit [aistudio.google.com](https://aistudio.google.com) and sign in.
+2. Click **Get API key** → **Create API key in new project**.
+3. Copy the generated key.
+4. Paste it into the **API Keys** section in the **Settings** tab.
 """)
-            st.caption("Free tier · 1,500 requests/day · No credit card required")
-            st.caption("CrowAgent™ Platform")
+            st.caption("Free tier · 1,500 requests/day · No credit card required.")
+            st.image("assets/CrowAgent_Logo_Horizontal_Dark.svg", width=200)
         return
 
     # ── BLOCK 5: ACTIVE CHAT STATE ────────────────────────────────────────────
 
-    # 5a. SESSION INIT
-    st.session_state.setdefault("ai_chat_history", [])
-    segment = st.session_state.get("user_segment", "university_he")
-    portfolio = st.session_state.get("portfolio", [])
-
-    # 5b. WELCOME BANNER
-    st.info(
-        "Welcome to your AI Advisor. I am connected to your active "
-        "property portfolio and ready to run thermal load simulations, "
-        "analyze ROI, and check regulatory compliance."
+    # 5a. Get required data from session state & handle segment resets
+    current_segment = st.session_state.get("user_segment", "university_he")
+    last_segment = st.session_state.get(
+        "ai_advisor_last_segment",
+        st.session_state.get("last_segment"),
     )
 
-    # 5c. STARTER PROMPTS (only shown when chat history is empty)
-    if len(st.session_state.ai_chat_history) == 0:
+    # If the segment changed since they last opened this tab, clear the chat memory
+    if last_segment is not None and current_segment != last_segment:
+        st.session_state["ai_chat_history"] = []
+        st.session_state["chat_history"] = []
+
+    st.session_state["ai_advisor_last_segment"] = current_segment
+    st.session_state["last_segment"] = current_segment
+
+    st.session_state.setdefault("ai_chat_history", [])
+    st.session_state.setdefault("chat_history", st.session_state["ai_chat_history"])
+    st.session_state.setdefault("ai_chat_history_by_segment", {})
+
+    api_key = st.session_state.get("gemini_key", "")
+    segment = current_segment
+    segment_name = st.session_state.get("current_segment_name", "University / Higher Education")
+    portfolio = st.session_state.get("portfolio", [])
+
+    # Keep legacy and current keys synchronized
+    st.session_state["chat_history"] = st.session_state["ai_chat_history"]
+    st.session_state["ai_chat_history_by_segment"][segment] = st.session_state["chat_history"]
+
+    # 5b. Define the two-column layout
+    left_col, right_col = st.columns([1, 2.5], gap="large")
+
+    # 5c. LEFT COLUMN: Context and starter prompts
+    with left_col:
+        st.markdown(f"**Segment:**\n`{segment_name}`")
+        st.markdown(f"**Active Assets:**\n`{len(portfolio)}`")
+        st.markdown("---")
+        st.markdown("**Suggested Queries:**")
         prompts = STARTER_PROMPTS.get(segment, STARTER_PROMPTS["university_he"])
-        st.markdown("**Suggested Queries for your Portfolio:**")
         for prompt in prompts:
             if st.button(
                 prompt,
                 key=f"starter_{prompt[:30]}",
                 use_container_width=True,
             ):
-                st.session_state.ai_chat_history.append(
-                    {"role": "user", "content": prompt}
-                )
+                # Add starter to history and rerun to trigger agent
+                st.session_state["chat_history"].append({"role": "user", "content": prompt})
+                st.session_state["ai_chat_history"] = st.session_state["chat_history"]
+                st.session_state["ai_chat_history_by_segment"][segment] = st.session_state["chat_history"]
                 st.rerun()
+        st.info("The AI is aware of your loaded assets and current business segment.", icon="ℹ️")
 
-    # 5d. CHAT HISTORY DISPLAY
-    for msg in st.session_state.ai_chat_history:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    # 5d. RIGHT COLUMN: Chat interface sub-frame
+    with right_col:
+        # This container creates a scrollable, bordered frame for the chat history
+        with st.container(height=500, border=True):
+            # Render the chat history from session state
+            for msg in st.session_state["chat_history"]:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
 
-    # 5e. PENDING RESPONSE HANDLER
-    history = st.session_state.ai_chat_history
-    if history and history[-1]["role"] == "user":
-        with st.status("⚙️ Analysing your portfolio...", expanded=True) as status:
-            try:
-                response = run_agent_turn(
-                    user_message=history[-1]["content"],
-                    segment=segment,
-                    portfolio=portfolio,
-                    api_key=api_key,
-                    status_widget=status,
-                )
-                status.update(
-                    label="✅ Analysis complete",
-                    state="complete",
-                    expanded=False,
-                )
-                st.session_state.ai_chat_history.append(
-                    {"role": "assistant", "content": response}
-                )
-                st.rerun()
-            except Exception as e:
-                err = str(e).lower()
-                if "429" in err:
-                    msg = (
-                        "Gemini API rate limit reached. "
-                        "Please wait 60 seconds and try again."
-                    )
-                elif "401" in err or "invalid" in err or "api key" in err:
-                    msg = (
-                        "Invalid API key detected. "
-                        "Please verify your key in Settings."
-                    )
-                elif "timeout" in err:
-                    msg = (
-                        "Request timed out. "
-                        "Please check your connection and retry."
-                    )
-                else:
-                    msg = (
-                        "AI Advisor encountered an unexpected error. "
-                        "Please retry in a moment."
-                    )
-                status.update(
-                    label="❌ Error occurred",
-                    state="error",
-                    expanded=False,
-                )
-                st.warning(msg)
-                st.session_state.ai_chat_history.pop()
-                # ↑ remove unanswered user message to prevent infinite retry loop
+            # If the last message is from the user, run the agent
+            history = st.session_state["chat_history"]
+            if history and history[-1]["role"] == "user":
+                with st.chat_message("assistant"):
+                    # The spinner appears inside the container while the agent runs
+                    with st.spinner("Analyzing portfolio..."):
+                        try:
+                            # 1. Safety Check: API Key
+                            if not api_key:
+                                st.warning("⚠️ AI Advisor is in offline mode. Please configure your Gemini API Key to receive portfolio insights.")
+                                st.stop()
 
-    # 5f. CHAT INPUT
-    user_input = st.chat_input(
-        "Ask about your portfolio, energy expenses, or compliance..."
-    )
-    if user_input:
-        st.session_state.ai_chat_history.append(
-            {"role": "user", "content": user_input}
-        )
-        st.rerun()
+                            # 2. Safety Check: Portfolio
+                            if not portfolio:
+                                st.error("Portfolio is empty. Please add assets to run analysis.")
+                                st.stop()
+
+                            # 3. Orchestrator Call
+                            # We wrap the orchestrator and agent call in a thread pool as requested
+                            def _process_advisor_request():
+                                # a) Run Orchestrator
+                                orch = ESGOrchestrator()
+                                # Wrap list in dict as expected by orchestrator
+                                orch_input = {"assets": portfolio}
+                                analysis = orch.run(orch_input, segment)
+                                
+                                # b) Build deterministic prompt with analysis
+                                analysis_str = json.dumps(analysis, default=str)
+                                if len(analysis_str) > 10000:
+                                    analysis_str = analysis_str[:10000] + "...(truncated)"
+                                
+                                augmented_message = (
+                                    f"{history[-1]['content']}\n\n"
+                                    f"[SYSTEM INJECTED ANALYSIS]:\n{analysis_str}\n\n"
+                                    "Please use the above analysis to answer the user's question."
+                                )
+
+                                # c) Call Gemini
+                                return run_agent_turn(
+                                    user_message=augmented_message,
+                                    segment=segment,
+                                    portfolio=portfolio,
+                                    api_key=api_key,
+                                )
+
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                future = executor.submit(_process_advisor_request)
+                                response = future.result()
+
+                        except RuntimeError as e:
+                            response = f"An error occurred while running the agent. \n\n**Error details:**\n`{e}`"
+                        except Exception as e:
+                            response = f"An unexpected error occurred. \n\n**Error details:**\n`{e}`"
+
+                    # Display the agent's response
+                    st.markdown(response)
+                    # Add the response to history and rerun to clear the spinner
+                    st.session_state["chat_history"].append({"role": "assistant", "content": response})
+                    st.session_state["ai_chat_history"] = st.session_state["chat_history"]
+                    st.session_state["ai_chat_history_by_segment"][segment] = st.session_state["chat_history"]
+                    st.rerun()
+
+        # The chat input is in the right column, but *outside* the scrollable container
+        if user_input := st.chat_input("Ask about your portfolio, energy, or compliance..."):
+            st.session_state["chat_history"].append({"role": "user", "content": user_input})
+            st.session_state["ai_chat_history"] = st.session_state["chat_history"]
+            st.session_state["ai_chat_history_by_segment"][segment] = st.session_state["chat_history"]
+            st.rerun()

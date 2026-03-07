@@ -5,10 +5,10 @@ try:
     from app.utils import validate_gemini_key
 except ImportError:
     # Fallback for local development
-    def validate_gemini_key(key: str) -> tuple[bool, str]:
-        if not key: return False, "Key is empty"
-        if not key.startswith("AIza"): return False, "Key should start with 'AIza'"
-        return True, "Valid format"
+    def validate_gemini_key(key: str) -> tuple[bool, str, bool]:
+        if not key: return False, "Key is empty", False
+        if not key.startswith("AIza"): return False, "Key should start with 'AIza'", False
+        return True, "Valid format", True
 
 def render(weather_data: Dict[str, Any]):
     """Renders the Settings tab content."""
@@ -49,7 +49,7 @@ def render(weather_data: Dict[str, Any]):
 
         if gem_key != st.session_state.get("gemini_key"):
             st.session_state.gemini_key = gem_key
-            is_valid, msg = validate_gemini_key(gem_key)
+            is_valid, msg, _ = validate_gemini_key(gem_key)
             st.session_state.gemini_key_valid = is_valid
             if is_valid:
                 st.toast("Gemini Key Validated", icon="✅")

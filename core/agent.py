@@ -23,64 +23,101 @@ from config.scenarios import SCENARIOS
 # ─────────────────────────────────────────────────────────────────────────────
 # API & MODEL CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
-GEMINI_URL           = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent"
+GEMINI_BASE_URL      = "https://generativelanguage.googleapis.com/v1/models"
+# Ordered by preference: stable GA first, then preview aliases for compatibility.
+GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+    "gemini-pro-latest",
+]
+GEMINI_FALLBACK_URLS = [
+    f"{GEMINI_BASE_URL}/{model}:generateContent" for model in GEMINI_MODELS
+]
+GEMINI_URL           = GEMINI_FALLBACK_URLS[0]
 MAX_OUTPUT_TOKENS    = 2000
 MAX_AGENT_LOOPS      = 10
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DYNAMIC SYSTEM PROMPT
-# ─────────────────────────────────────────────────────────────────────────────
-REGULATORY_CONTEXT = {
-    "university_he": (
-        "SECR (Streamlined Energy & Carbon Reporting), "
-        "MEES (Minimum Energy Efficiency Standards), "
-        "Display Energy Certificates (DECs)"
-    ),
-    "smb_landlord": (
-        "MEES 2025 and 2028 compliance thresholds, "
-        "EPC Band C targets, Domestic Minimum Standard"
-    ),
-    "smb_industrial": (
-        "SECR Scope 1 and Scope 2 carbon reporting, "
-        "ISO 50001 energy management framework"
-    ),
-    "individual_selfbuild": (
-        "Part L 2021 (Conservation of Fuel and Power), "
-        "SAP/BREDEM energy modelling, Future Homes Standard"
-    ),
-}
-
-
 def build_system_prompt(segment: str, portfolio: list) -> str:
-    reg_context = REGULATORY_CONTEXT.get(
-        segment, REGULATORY_CONTEXT["university_he"]
-    )
-    portfolio_lines = []
-    for b in portfolio:
-        name   = b.get("name", "Unknown")
-        btype  = b.get("type", "Unknown")
-        area   = b.get("floor_area_m2", "N/A")
-        energy = b.get("baseline_energy_mwh", "N/A")
-        portfolio_lines.append(
-            f"  - {name} | Type: {btype} | "
-            f"Area: {area} m² | Baseline: {energy} MWh/yr"
+    """
+    Builds a dynamic, context-aware system prompt for the AI Advisor.
+
+    Args:
+        segment: The active user segment (e.g., 'university_he').
+        portfolio: A list of building data dictionaries.
+
+    Returns:
+        A formatted string to be used as the system prompt for the Gemini model.
+    """
+    # Guard against argument swapping (legacy compatibility)
+    if isinstance(segment, list) and isinstance(portfolio, str):
+        segment, portfolio = portfolio, segment
+
+    # Ensure prompt always contains direct JSON context for deterministic grounding.
+    segment_json = json.dumps(segment, ensure_ascii=False)
+    portfolio_json = json.dumps(portfolio, ensure_ascii=False, default=str, indent=2)
+
+    # 1. Dashboard Aggregation: Calculate totals from the portfolio.
+    total_area = sum(b.get("floor_area_m2", 0) or 0 for b in portfolio)
+    total_energy = sum(b.get("baseline_energy_mwh", 0) or 0 for b in portfolio)
+
+    if portfolio:
+        building_list = []
+        for b in portfolio:
+            name = b.get("name", "Unnamed Asset")
+            area = b.get("floor_area_m2", 0) or 0
+            energy = b.get("baseline_energy_mwh", 0) or 0
+            building_list.append(
+                f"- **{name}**: {area:,.0f} m², {energy:,.0f} MWh/yr"
+            )
+        portfolio_summary = (
+            "**Portfolio Summary:**\n"
+            f"- **Total Buildings:** {len(portfolio)}\n"
+            f"- **Total Floor Area:** {total_area:,.0f} m²\n"
+            f"- **Total Baseline Energy:** {total_energy:,.0f} MWh/yr\n\n"
+            "**Building List:**\n" + "\n".join(building_list)
         )
-    portfolio_block = (
-        "\n".join(portfolio_lines)
-        if portfolio_lines
-        else "  No assets currently loaded."
-    )
+    else:
+        portfolio_summary = "**Portfolio Summary:**\n- No assets have been loaded. The portfolio is empty."
+
+    # 2. Capabilities Awareness: Define what the AI can do.
+    capabilities = """- **Dashboard Summary:** Synthesise portfolio data to provide a high-level overview of energy, and area.
+- **Compliance Analysis:** Identify and explain regulatory compliance gaps (e.g., MEES, SECR) based on the user's specific business segment.
+- **Financial ROI:** Calculate and compare the return on investment, payback periods, and cost-effectiveness of various retrofit scenarios.
+- **Thermal Physics Modelling:** Use the integrated physics engine to run detailed thermal simulations for specific buildings and interventions."""
+
+    # 3. Segment Lock & Core Instructions
+    instructions = f"""**CRITICAL INSTRUCTIONS:**
+1.  **Segment Focus:** Your advice **MUST** be strictly tailored to the user's active segment: **'{segment}'**. All compliance rules, regulations, and recommendations must be relevant to this segment only. Do not discuss rules for other segments.
+2.  **2026 UK Compliance Baseline:** Follow current UK guidance with a **fabric-first** approach. Prioritise insulation and glazing upgrades (Part L alignment) before recommending mechanical systems (e.g., heat pumps), unless tool evidence proves a different order for a specific building.
+3.  **MEES Cost Cap:** For PRS/MEES upgrade planning, cite and use the **£10,000** cost cap (not £3,500).
+4.  **Regulatory Links (Mandatory):** When providing UK compliance advice, you **MUST** include relevant official references. Include these links when relevant:
+    - EPC register: https://www.gov.uk/find-energy-certificate
+    - MEES landlord guidance: https://www.gov.uk/guidance/domestic-private-rented-property-minimum-energy-efficiency-standard-landlord-guidance
+    - Part L approved document: https://www.gov.uk/government/publications/conservation-of-fuel-and-power-approved-document-l
+    Always prefer `gov.uk` or other official regulatory bodies.
+5.  **Building-by-Building Analysis:** Analyse the portfolio asset-by-asset and clearly separate findings for each building before giving portfolio-level recommendations.
+6.  **No Assumptions (Guardrail):** You **MUST NOT** invent, estimate, or assume any quantitative data (costs, energy savings, performance metrics). Your primary function is to execute the available tools to gather real data. If a user asks a question that requires a calculation, run the appropriate tool. If you cannot answer without a tool, state that you need to run a tool first.
+7.  **Tool-First Workflow:** Always use your tools to gather evidence *before* formulating an answer. Your response should be a synthesis of the data returned by the tools.
+8.  **Honesty and Transparency:** If a tool fails or the data is unavailable, state it clearly. Do not attempt to fill in the gaps.
+"""
+
+    # Combine all parts into the final system prompt
     return (
-        f"You are CrowAgent™ AI Advisor, a physics-informed sustainability "
-        f"decision intelligence assistant for UK built-environment stakeholders.\n\n"
-        f"Active segment: {segment}\n"
-        f"Applicable regulatory frameworks: {reg_context}\n\n"
-        f"Active portfolio:\n{portfolio_block}\n\n"
-        f"Instructions:\n"
-        f"- Always cite physics tool outputs when making energy claims.\n"
-        f"- Never fabricate energy figures, costs, or compliance statuses.\n"
-        f"- All outputs are indicative only. Recommend professional verification.\n"
-        f"- When tools are available, run them. Do not estimate what can be computed."
+        "You are CrowAgent™, a world-class, physics-informed AI sustainability consultant for the UK built environment.\n\n"
+        "## User Context\n"
+        f"The user is operating in the **'{segment}'** segment. Your advice and analysis must be strictly confined to the regulations and commercial drivers of this sector.\n\n"
+        "## Raw Runtime Context (JSON)\n"
+        f"- segment: `{segment_json}`\n"
+        f"- portfolio:\n```json\n{portfolio_json}\n```\n\n"
+        f"## Portfolio Snapshot\n{portfolio_summary}\n\n"
+        "## AI Capabilities\n"
+        "You have the following capabilities:\n"
+        f"{capabilities}\n\n"
+        f"{instructions}"
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,6 +262,7 @@ def execute_tool(
     args: dict,
     buildings: dict,
     scenarios: dict,
+    calculate_fn=None,
     tariff: float = constants.DEFAULT_ELECTRICITY_TARIFF_GBP_PER_KWH,
 ) -> dict[str, Any]:
     """
@@ -232,8 +270,12 @@ def execute_tool(
     buildings and scenarios are injected from the main app.
     Calls core.physics directly.
     """
-    temp = float(args.get("temperature_c", 10.5))
+    try:
+        temp = float(args.get("temperature_c", 10.5))
+    except (ValueError, TypeError):
+        temp = 10.5
     weather = {"temperature_c": temp, "wind_speed_mph": 9.2}
+    calc = calculate_fn or physics.calculate_thermal_load
 
     # ── Tool: run_scenario ────────────────────────────────────────────────────
     if name == "run_scenario":
@@ -246,7 +288,7 @@ def execute_tool(
             return {"error": f"Scenario '{sname}' not found. "
                     f"Available: {list(scenarios.keys())}"}
         try:
-            result = physics.calculate_thermal_load(
+            result = calc(
                 buildings[bname], scenarios[sname], weather, tariff
             )
         except Exception as exc:
@@ -268,12 +310,14 @@ def execute_tool(
         if sname not in scenarios:
             return {"error": f"Scenario '{sname}' not found."}
         rows = []
+        errors = []
         for bname, bdata in buildings.items():
             try:
-                r = physics.calculate_thermal_load(
+                r = calc(
                     bdata, scenarios[sname], weather, tariff
                 )
-            except Exception:
+            except Exception as exc:
+                errors.append({"building": bname, "error": str(exc)})
                 continue
             cost = scenarios[sname]["install_cost_gbp"]
             rows.append({
@@ -289,12 +333,13 @@ def execute_tool(
                                       if cost > 0 else None,
             })
         rows.sort(key=lambda x: x["carbon_saving_t"], reverse=True)
-        return {"scenario": sname, "results": rows, "temperature_c": temp}
+        return {"scenario": sname, "results": rows, "temperature_c": temp, "calculation_errors": errors}
 
     # ── Tool: find_best_for_budget ────────────────────────────────────────────
     elif name == "find_best_for_budget":
         budget = float(args["budget_gbp"])
         candidates = []
+        errors = []
         for bname, bdata in buildings.items():
             for sname, sdata in scenarios.items():
                 if sdata["install_cost_gbp"] <= 0:
@@ -302,10 +347,11 @@ def execute_tool(
                 if sdata["install_cost_gbp"] > budget:
                     continue
                 try:
-                    r = physics.calculate_thermal_load(
+                    r = calc(
                         bdata, sdata, weather, tariff
                     )
-                except Exception:
+                except Exception as exc:
+                    errors.append({"building": bname, "scenario": sname, "error": str(exc)})
                     continue
                 if r["carbon_saving_t"] <= 0:
                     continue
@@ -322,13 +368,17 @@ def execute_tool(
                     ),
                 })
         if not candidates:
-            return {"error": f"No scenarios fit within £{budget:,.0f} budget."}
+            error_message = f"No scenarios fit within £{budget:,.0f} budget."
+            if errors:
+                error_message += " Some calculations also failed."
+            return {"error": error_message, "calculation_errors": errors}
         candidates.sort(key=lambda x: x["cost_per_tonne_co2"])
         return {
             "budget_gbp": budget,
             "top_recommendation": candidates[0],
             "all_options_ranked": candidates[:5],
             "temperature_c": temp,
+            "calculation_errors": errors,
         }
 
     # ── Tool: get_building_info ───────────────────────────────────────────────
@@ -351,7 +401,7 @@ def execute_tool(
             "baseline_cost_gbp_yr":  round(b["baseline_energy_mwh"] * 1000 * constants.DEFAULT_ELECTRICITY_TARIFF_GBP_PER_KWH, 0),
             "occupancy_hours_yr":    b["occupancy_hours"],
             "built_year":            b["built_year"],
-            "description":           b["description"],
+            "description":           b.get("description", ""),
         }
 
     # ── Tool: rank_all_scenarios ──────────────────────────────────────────────
@@ -361,12 +411,14 @@ def execute_tool(
         if bname not in buildings:
             return {"error": f"Building '{bname}' not found."}
         rows = []
+        errors = []
         for sname, sdata in scenarios.items():
             try:
-                r = physics.calculate_thermal_load(
+                r = calc(
                     buildings[bname], sdata, weather, tariff
                 )
-            except Exception:
+            except Exception as exc:
+                errors.append({"scenario": sname, "error": str(exc)})
                 continue
             cost = sdata["install_cost_gbp"]
             cpt = round(cost / max(r["carbon_saving_t"], 0.01), 1) if cost > 0 else None
@@ -391,7 +443,11 @@ def execute_tool(
             "building":  bname,
             "ranked_by": rank_by,
             "scenarios": rows,
+            "calculation_errors": errors,
         }
+
+    elif name == "list_buildings":
+        return {"buildings": sorted(list(buildings.keys()))}
 
     return {"error": f"Unknown tool: {name}"}
 
@@ -406,57 +462,132 @@ def _call_gemini(
     use_tools: bool = True,
 ) -> dict:
     """
-    Single Gemini API call. Returns the raw response dict.
+    Single Gemini API call with schema fallbacks for API-version differences.
     messages format: [{"role": "user"|"model", "parts": [...]}]
     """
-    payload: dict = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
+    # API Key validation and sanitization for debugging
+    if not api_key or not isinstance(api_key, str):
+        print("--- GEMINI API DEBUG ---")
+        print("CRITICAL: API key is missing or not a string.")
+        print("--- END DEBUG ---")
+        return {"error": "Gemini API key is missing."}
+
+    clean_api_key = api_key.strip()
+    if len(clean_api_key) != 39:
+        print("--- GEMINI API DEBUG ---")
+        print(f"WARNING: API key length is {len(clean_api_key)}, expected 39. Key might be truncated.")
+        print(f"Key used: '{clean_api_key[:5]}...{clean_api_key[-4:]}'")
+        print("--- END DEBUG ---")
+    if not clean_api_key.startswith("AIza"):
+        print("--- GEMINI API DEBUG ---")
+        print("WARNING: API key does not start with 'AIza'. It may be invalid.")
+        print(f"Key prefix: '{clean_api_key[:4]}'")
+        print("--- END DEBUG ---")
+
+    # Primary payload for REST API (camelCase keys required)
+    payload_camel: dict = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": messages,
         "generationConfig": {
             "maxOutputTokens": MAX_OUTPUT_TOKENS,
-            "temperature": 0.2,   # low = consistent, factual answers
+            "temperature": 0.2,
             "topP": 0.8,
         },
     }
     if use_tools:
-        payload["tools"] = [{"function_declarations": AGENT_TOOLS}]
-        payload["tool_config"] = {
-            "function_calling_config": {"mode": "AUTO"}
+        payload_camel["tools"] = [{"functionDeclarations": AGENT_TOOLS}]
+        payload_camel["toolConfig"] = {
+            "functionCallingConfig": {"mode": "AUTO"}
         }
 
-    try:
-        resp = requests.post(GEMINI_URL, timeout=30,
-            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-            json=payload,
-        )
-    except requests.exceptions.Timeout:
-        return {"error": "Gemini API request timed out (30 s). Check your connection and retry."}
-    except requests.exceptions.ConnectionError:
-        return {"error": "Could not connect to Gemini API. Check your internet connection."}
-    except requests.exceptions.RequestException as exc:
-        return {"error": f"Gemini API request failed: {exc}"}
+    # Final fallback: no top-level system/tool fields at all.
+    # We inject the system prompt into the first user message to avoid schema mismatches.
+    merged_messages = list(messages)
+    if merged_messages and merged_messages[0].get("role") == "user":
+        first_parts = merged_messages[0].get("parts", [])
+        first_text = first_parts[0].get("text", "") if first_parts else ""
+        merged_messages[0] = {
+            "role": "user",
+            "parts": [{"text": f"[SYSTEM INSTRUCTIONS]\n{system_prompt}\n\n[USER MESSAGE]\n{first_text}"}],
+        }
+    payload_minimal = {
+        "contents": merged_messages,
+        "generationConfig": {
+            "maxOutputTokens": MAX_OUTPUT_TOKENS,
+            "temperature": 0.2,
+            "topP": 0.8,
+        },
+    }
 
-    if resp.status_code != 200:
-        error_msg = "Unknown error"
-        try:
-            error_data = resp.json()
-            error_msg = error_data.get('error', {}).get('message', resp.text[:200])
-        except Exception:
-            error_msg = resp.text[:200]
-        
-        # Enhanced error messages for common issues
-        if "404" in str(resp.status_code) or "not found" in error_msg.lower():
-            error_msg = (
-                f"Model not available. Please ensure your API key is valid. "
-                f"Error: {error_msg}"
+    attempts = [payload_camel, payload_minimal]
+    last_error = None
+
+    for url in GEMINI_FALLBACK_URLS:
+        for idx, payload in enumerate(attempts, start=1):
+            try:
+                resp = requests.post(
+                    url,
+                    timeout=30,
+                    headers={"Content-Type": "application/json", "x-goog-api-key": clean_api_key},
+                    json=payload,
+                )
+            except requests.exceptions.Timeout:
+                last_error = "Gemini API request timed out (30 s). Check your connection and retry."
+                continue
+            except requests.exceptions.ConnectionError:
+                last_error = "Could not connect to Gemini API. Check your internet connection."
+                continue
+            except requests.exceptions.RequestException as exc:
+                last_error = f"Gemini API request failed: {exc}"
+                continue
+
+            if resp.status_code == 200:
+                return resp.json()
+
+            # Parse error and decide whether to retry schema or fallback endpoint/model.
+            try:
+                error_data = resp.json()
+                error_msg = error_data.get("error", {}).get("message", resp.text[:200])
+            except Exception:
+                error_msg = resp.text[:200]
+
+            last_error = f"Gemini API error {resp.status_code} ({url}): {error_msg}"
+            lower = error_msg.lower()
+            schema_mismatch = (
+                "unknown name" in lower
+                or "cannot find field" in lower
+                or "invalid json payload" in lower
             )
-        elif "401" in str(resp.status_code) or "unauthorized" in error_msg.lower():
-            error_msg = "Invalid API key. Please check and try again."
-        elif "403" in str(resp.status_code) or "permission" in error_msg.lower():
-            error_msg = "API key doesn't have permission. Check your Google Cloud Console."
-        
-        return {"error": f"Gemini API error {resp.status_code}: {error_msg}"}
-    return resp.json()
+            model_not_found = (
+                resp.status_code == 404
+                and ("is not found" in lower or "not supported for generatecontent" in lower)
+            )
+
+            if schema_mismatch and idx < len(attempts):
+                continue
+
+            # Try next model/endpoint if this one is unavailable.
+            if model_not_found:
+                break
+
+            return {"error": last_error}
+
+    return {"error": last_error or "Gemini API request failed across all endpoint/model fallbacks."}
+
+
+def _invoke_gemini_with_compat(
+    api_key: str,
+    messages: list,
+    system_prompt: str,
+    use_tools: bool = True,
+) -> dict:
+    """Compatibility wrapper retained for legacy call sites."""
+    return _call_gemini(
+        api_key=api_key,
+        messages=messages,
+        system_prompt=system_prompt,
+        use_tools=use_tools,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -477,7 +608,7 @@ def run_agent_turn(
     Raises RuntimeError on unrecoverable API errors.
     """
     # Build context-aware system prompt from segment and portfolio
-    system_prompt = build_system_prompt(segment, portfolio)
+    system_prompt = build_system_prompt(segment=segment, portfolio=portfolio)
 
     # Convert portfolio list to building registry dict for tool execution
     building_registry = {b["name"]: b for b in portfolio}
@@ -505,7 +636,7 @@ def run_agent_turn(
 
     while loops < MAX_AGENT_LOOPS:
         loops += 1
-        response = _call_gemini(api_key, messages, system_prompt, use_tools=True)
+        response = _invoke_gemini_with_compat(api_key, messages, system_prompt, use_tools=True)
 
         # Handle API error
         if "error" in response:
@@ -539,7 +670,12 @@ def run_agent_turn(
 
                 # Execute the tool
                 result = execute_tool(
-                    name, fargs, building_registry, scenario_registry, tariff
+                    name=name,
+                    args=fargs,
+                    buildings=building_registry,
+                    scenarios=scenario_registry,
+                    calculate_fn=physics.calculate_thermal_load,
+                    tariff=tariff,
                 )
 
                 tool_calls_log.append({
@@ -585,7 +721,7 @@ def run_agent_turn(
         "role": "user",
         "parts": [{"text": "Please summarise your findings so far in 3 sentences."}]
     })
-    final_resp = _call_gemini(api_key, messages, system_prompt, use_tools=False)
+    final_resp = _invoke_gemini_with_compat(api_key, messages, system_prompt, use_tools=False)
     summarisation_error = final_resp.get("error")
     if not summarisation_error:
         parts = final_resp.get("candidates", [{}])[0].get("content", {}).get("parts", [])

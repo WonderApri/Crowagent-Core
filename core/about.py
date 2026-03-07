@@ -9,28 +9,27 @@ def render():
     with col1:
         st.subheader("📬 Contact & Enquiries")
         st.markdown("""
-        **Project Lead**
+        **Founder & Creator**
         Aparajita Parihar
-        BSc Computer Science (Year 1)
-        University of Reading
+        CrowAgent™ Platform
         
         **Email**
         [crowagent.platform@gmail.com](mailto:crowagent.platform@gmail.com)
         
-        **GitHub**
-        [github.com/WonderApri/crowagent-platform](https://github.com/WonderApri/crowagent-platform)
+        **GitHub Repository**
+        [https://github.com/WonderApri/crowagent-platform](https://github.com/WonderApri/crowagent-platform)
         
         **Trademark Status**
-        CrowAgent™ is an unregistered trademark.
-        UK IPO Class 42 application pending.
+        CrowAgent™ is a trademark of Aparajita Parihar.
+        Trademark application filed with the UK Intellectual Property Office (UK IPO), Class 42.
+        Registration pending.
         
-        **Enquiry Types Welcome**
-        • Demo or pilot programme requests
-        • Academic collaboration
-        • Research partnerships
-        • Technical questions
-        • Press & media
-        • Bug reports & feedback
+        **Collaboration Opportunities**
+        • University pilot programmes
+        • Sustainability research collaboration
+        • Estate and facilities partnerships
+        • Climate technology initiatives
+        • Media and academic enquiries
         
         **RESPONSE TIME**
         We aim to respond to all enquiries within 2–3
@@ -78,6 +77,8 @@ def render():
 
         Greenfield University is a fictional institution created for demonstration purposes. Any resemblance to
         any real institution is coincidental.
+        
+        To the maximum extent permitted by law, the author and platform owner shall not be liable for any direct, indirect, incidental, or consequential damages arising from the use of this platform or reliance on any outputs generated.
         """)
         
         with st.expander("🤖 AI Advisor Disclaimer"):
@@ -93,6 +94,12 @@ def render():
             professional before any action is taken. The AI Advisor is not a substitute for professional
             engineering, financial, or legal advice. Neither Aparajita Parihar nor CrowAgent™ Platform
             accepts liability for decisions made on the basis of AI Advisor outputs.
+            """)
+            
+        with st.expander("🔒 Data Usage Notice"):
+            st.markdown("""
+            User queries submitted to the AI Advisor may be processed by third-party AI services (e.g., Google Gemini).
+            Users should avoid submitting confidential or sensitive information.
             """)
             
         with st.expander("📊 Data Sources & Assumptions"):
@@ -113,11 +120,9 @@ def render():
             **CrowAgent™ Platform**, including all source code, physics models, UI design, and brand assets, is the
             original work of **Aparajita Parihar** and is protected by copyright.
 
-            **CrowAgent™** is an unregistered trademark of Aparajita Parihar. A UK IPO Class 42 trademark application
-            is currently pending.
+            **CrowAgent™** is a trademark of Aparajita Parihar. Trademark application filed with the UK Intellectual Property Office (UK IPO), Class 42. Registration pending.
 
-            This platform is an independent research project and is not affiliated with the University of Reading or
-            any other institution.
+            CrowAgent™ Platform is an independent research and development project created by Aparajita Parihar. It is not endorsed by, affiliated with, or sponsored by the University of Reading or any other institution.
 
             **© 2026 Aparajita Parihar. All rights reserved.** Not licensed for commercial use without written permission
             of the author.

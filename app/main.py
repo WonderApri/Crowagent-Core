@@ -10,16 +10,18 @@ Navigation architecture: in-content horizontal button bar
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
 import logging
 import os
 import sys
 
 import streamlit as st
-
-# ── Project root on sys.path ─────────────────────────────────────────────────
-_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
 
 import app.branding as branding
 import app.session as session
@@ -28,18 +30,94 @@ import app.session as session
 st.set_page_config(**branding.PAGE_CONFIG)
 
 # ── Remaining imports (after set_page_config) ────────────────────────────────
-import app.sidebar as sidebar
 import app.tabs.dashboard as tab_dashboard
 import app.tabs.financial as tab_financial
 import app.tabs.compliance_hub as tab_compliance
 import app.tabs.settings as tab_settings
 import app.tabs.ai_advisor as tab_ai_advisor
 import core.about as about_page
-from app.segments import SEGMENT_IDS, get_segment_handler
+import services.weather as weather_service
+from app.segments import SEGMENT_IDS, SEGMENT_LABELS, get_segment_handler
 from app.session import ensure_portfolio_defaults
+from config.scenarios import SCENARIOS, SEGMENT_SCENARIOS, SEGMENT_DEFAULT_SCENARIOS
+from app.segments.university_he import BUILDINGS
+from core.physics import calculate_thermal_load
+
+# Re-export helpers used by legacy tests
+from app.session import _get_secret          # noqa: F401
+from app.utils import _extract_uk_postcode   # noqa: F401
+
+import json as _json
 
 # Re-export for any legacy caller that does `from app.main import _card`
 _card = branding.render_card
+
+# Module-level logo URI (used by tests and the footer renderer)
+LOGO_URI: str = branding.get_logo_uri()
+
+
+def _load_logo_uri() -> str:
+    """Return the horizontal CrowAgent™ logo as a base64 data URI.
+
+    Searches CWD-relative asset paths so the loader works even when
+    Streamlit copies the script to a temporary directory.
+    """
+    return branding._load_asset_uri("CrowAgent_Logo_Horizontal_Dark.svg")
+
+
+def _load_icon_uri() -> str:
+    """Return the square CrowAgent™ icon as a base64 data URI."""
+    return branding._load_asset_uri("CrowAgent_Icon_Square.svg")
+
+
+def _add_building_from_json(json_str: str) -> tuple[bool, str]:
+    """Parse *json_str* and add the building definition to BUILDINGS.
+
+    Returns (True, name) on success or (False, error_message) on failure.
+    """
+    try:
+        data = _json.loads(json_str)
+    except Exception as exc:
+        return False, f"JSON parse error: {exc}"
+    if not isinstance(data, dict):
+        return False, 'Missing "name": payload must be a JSON object'
+    name = data.get("name", "").strip()
+    if not name:
+        return False, 'Missing "name" field in building definition'
+    BUILDINGS[name] = {k: v for k, v in data.items() if k != "name"}
+    return True, name
+
+
+def _add_scenario_from_json(json_str: str) -> tuple[bool, str]:
+    """Parse *json_str* and add the scenario definition to SCENARIOS.
+
+    Returns (True, name) on success or (False, error_message) on failure.
+    """
+    try:
+        data = _json.loads(json_str)
+    except Exception as exc:
+        return False, f"JSON parse error: {exc}"
+    if not isinstance(data, dict):
+        return False, 'Missing "name": payload must be a JSON object'
+    name = data.get("name", "").strip()
+    if not name:
+        return False, 'Missing "name" field in scenario definition'
+    SCENARIOS[name] = {k: v for k, v in data.items() if k != "name"}
+    return True, name
+
+
+def _segment_scenario_options(segment: str) -> list[str]:
+    """Return the list of scenario names available for a given segment."""
+    if segment in SEGMENT_SCENARIOS:
+        return list(SEGMENT_SCENARIOS[segment])
+    return list(SCENARIOS.keys())
+
+
+def _segment_default_scenarios(segment: str | None) -> list[str]:
+    """Return the default pre-selected scenario names for a given segment."""
+    if segment and segment in SEGMENT_DEFAULT_SCENARIOS:
+        return list(SEGMENT_DEFAULT_SCENARIOS[segment])
+    return [list(SCENARIOS.keys())[0]]  # fallback: first scenario only
 
 # ── Compliance page title map ────────────────────────────────────────────────
 _COMPLIANCE_TITLES: dict[str, str] = {
@@ -175,6 +253,55 @@ def _page_about() -> None:
     branding.render_footer()
 
 
+
+def _render_segment_gate() -> None:
+    """In-page segment selector (no sidebar dependency)."""
+    branding.render_page_logo()
+    st.markdown("## Welcome to CrowAgent™")
+    st.caption("Select your profile to configure portfolio defaults and compliance context.")
+
+    descriptions = {
+        "university_he": "Campus estate management, SECR and decarbonisation planning.",
+        "smb_landlord": "Commercial landlord compliance, MEES and EPC uplift strategy.",
+        "smb_industrial": "Industrial energy optimisation, carbon baseline and retrofit planning.",
+        "individual_selfbuild": "Part L/FHS guidance for self-build and home retrofit pathways.",
+    }
+
+    cols = st.columns(2)
+    items = list(SEGMENT_LABELS.items())
+    for idx, (seg_id, label) in enumerate(items):
+        with cols[idx % 2]:
+            with st.container(border=True):
+                st.markdown(f"### {label}")
+                st.caption(descriptions.get(seg_id, ""))
+                if st.button("Select Profile", key=f"seg_{seg_id}", use_container_width=True, type="primary"):
+                    session.switch_segment_with_defaults(seg_id)
+                    st.rerun()
+    branding.render_footer()
+
+
+def _fetch_weather_silently() -> dict:
+    """Populate weather context used by pages without sidebar."""
+    lat = st.session_state.get("wx_lat", 51.45)
+    lon = st.session_state.get("wx_lon", -0.97)
+    loc_name = st.session_state.get("wx_location_name", "Reading (Default)")
+    provider = st.session_state.get("weather_provider", "open_meteo")
+    try:
+        return weather_service.get_weather(
+            lat, lon, loc_name, provider,
+            met_office_key=st.session_state.get("met_office_key"),
+            openweathermap_key=st.session_state.get("openweathermap_key"),
+        )
+    except Exception:
+        return {
+            "temperature_c": 10.0,
+            "condition": "Fallback",
+            "description": "Fallback",
+            "location_name": loc_name,
+            "wind_speed_mph": 0,
+            "humidity_pct": 0,
+        }
+
 # ── Main orchestrator ────────────────────────────────────────────────────────
 
 def run() -> None:
@@ -199,12 +326,13 @@ def run() -> None:
     # 5. URL query-param bootstrap
     _resolve_query_params()
 
-    # 6. Segment gate & Context Fetching
-    _segment, _weather, _location = sidebar.get_sidebar_context()
+    # 6. Segment gate & context fetching (no sidebar dependency)
+    _segment = st.session_state.get("user_segment")
     if not _segment:
+        _render_segment_gate()
         return
 
-    st.session_state["_current_weather"] = _weather
+    st.session_state["_current_weather"] = _fetch_weather_silently()
 
     # 7. Route to active page — _page_setup() inside each wrapper handles
     # CSS injection, logo bar, and the nav button row.
@@ -220,5 +348,4 @@ def run() -> None:
     _ROUTE.get(_current, _page_dashboard)()
 
 
-if __name__ == "__main__":
-    run()
+run()
