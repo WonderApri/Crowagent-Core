@@ -421,7 +421,9 @@ def switch_segment_with_defaults(new_segment: str) -> None:
     Does NOT trigger the PDF modal — that is handled in the UI.
     """
     from config.scenarios import SEGMENT_DEFAULT_SCENARIOS
+    from app.segments import SEGMENT_LABELS
     st.session_state.user_segment = new_segment
+    st.session_state.current_segment_name = SEGMENT_LABELS.get(new_segment)
     st.session_state.portfolio = load_segment_defaults(new_segment)
     st.session_state.active_analysis_ids = [
         a["id"] for a in st.session_state.portfolio
