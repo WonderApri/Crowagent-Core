@@ -39,12 +39,85 @@ import core.about as about_page
 import services.weather as weather_service
 from app.segments import SEGMENT_IDS, SEGMENT_LABELS, get_segment_handler
 from app.session import ensure_portfolio_defaults
-from config.scenarios import SCENARIOS
+from config.scenarios import SCENARIOS, SEGMENT_SCENARIOS, SEGMENT_DEFAULT_SCENARIOS
 from app.segments.university_he import BUILDINGS
 from core.physics import calculate_thermal_load
 
+# Re-export helpers used by legacy tests
+from app.session import _get_secret          # noqa: F401
+from app.utils import _extract_uk_postcode   # noqa: F401
+
+import json as _json
+
 # Re-export for any legacy caller that does `from app.main import _card`
 _card = branding.render_card
+
+# Module-level logo URI (used by tests and the footer renderer)
+LOGO_URI: str = branding.get_logo_uri()
+
+
+def _load_logo_uri() -> str:
+    """Return the horizontal CrowAgent™ logo as a base64 data URI.
+
+    Searches CWD-relative asset paths so the loader works even when
+    Streamlit copies the script to a temporary directory.
+    """
+    return branding._load_asset_uri("CrowAgent_Logo_Horizontal_Dark.svg")
+
+
+def _load_icon_uri() -> str:
+    """Return the square CrowAgent™ icon as a base64 data URI."""
+    return branding._load_asset_uri("CrowAgent_Icon_Square.svg")
+
+
+def _add_building_from_json(json_str: str) -> tuple[bool, str]:
+    """Parse *json_str* and add the building definition to BUILDINGS.
+
+    Returns (True, name) on success or (False, error_message) on failure.
+    """
+    try:
+        data = _json.loads(json_str)
+    except Exception as exc:
+        return False, f"JSON parse error: {exc}"
+    if not isinstance(data, dict):
+        return False, 'Missing "name": payload must be a JSON object'
+    name = data.get("name", "").strip()
+    if not name:
+        return False, 'Missing "name" field in building definition'
+    BUILDINGS[name] = {k: v for k, v in data.items() if k != "name"}
+    return True, name
+
+
+def _add_scenario_from_json(json_str: str) -> tuple[bool, str]:
+    """Parse *json_str* and add the scenario definition to SCENARIOS.
+
+    Returns (True, name) on success or (False, error_message) on failure.
+    """
+    try:
+        data = _json.loads(json_str)
+    except Exception as exc:
+        return False, f"JSON parse error: {exc}"
+    if not isinstance(data, dict):
+        return False, 'Missing "name": payload must be a JSON object'
+    name = data.get("name", "").strip()
+    if not name:
+        return False, 'Missing "name" field in scenario definition'
+    SCENARIOS[name] = {k: v for k, v in data.items() if k != "name"}
+    return True, name
+
+
+def _segment_scenario_options(segment: str) -> list[str]:
+    """Return the list of scenario names available for a given segment."""
+    if segment in SEGMENT_SCENARIOS:
+        return list(SEGMENT_SCENARIOS[segment])
+    return list(SCENARIOS.keys())
+
+
+def _segment_default_scenarios(segment: str | None) -> list[str]:
+    """Return the default pre-selected scenario names for a given segment."""
+    if segment and segment in SEGMENT_DEFAULT_SCENARIOS:
+        return list(SEGMENT_DEFAULT_SCENARIOS[segment])
+    return [list(SCENARIOS.keys())[0]]  # fallback: first scenario only
 
 # ── Compliance page title map ────────────────────────────────────────────────
 _COMPLIANCE_TITLES: dict[str, str] = {
@@ -204,6 +277,7 @@ def _render_segment_gate() -> None:
                 if st.button("Select Profile", key=f"seg_{seg_id}", use_container_width=True, type="primary"):
                     session.switch_segment_with_defaults(seg_id)
                     st.rerun()
+    branding.render_footer()
 
 
 def _fetch_weather_silently() -> dict:
@@ -274,5 +348,4 @@ def run() -> None:
     _ROUTE.get(_current, _page_dashboard)()
 
 
-if __name__ == "__main__":
-    run()
+run()

@@ -99,7 +99,7 @@ class TestDivisionByZeroGuard:
             **app_main.BUILDINGS["Greenfield Library"],
             "baseline_energy_mwh": 0.0,
         }
-        scenario = app_main.SCENARIOS["Solar Glass Installation"]
+        scenario = app_main.SCENARIOS["Glazing Upgrade"]
         # Must not raise
         result = app_main.calculate_thermal_load(zero_building, scenario, WEATHER)
         assert isinstance(result["energy_saving_pct"], float)
