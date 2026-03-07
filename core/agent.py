@@ -26,13 +26,9 @@ from config.scenarios import SCENARIOS
 GEMINI_BASE_URL      = "https://generativelanguage.googleapis.com/v1/models"
 # Ordered by preference: stable GA first, then preview aliases for compatibility.
 GEMINI_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-3.1-flash-lite-preview",
-    "gemini-3.1-pro-preview",
-    "gemini-3-flash-preview",
-    "gemini-flash-latest",
-    "gemini-pro-latest",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+    "gemini-1.0-pro",
 ]
 GEMINI_FALLBACK_URLS = [
     f"{GEMINI_BASE_URL}/{model}:generateContent" for model in GEMINI_MODELS
