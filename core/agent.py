@@ -26,10 +26,13 @@ from config.scenarios import SCENARIOS
 GEMINI_BASE_URL      = "https://generativelanguage.googleapis.com/v1/models"
 # Ordered by preference: stable GA first, then preview aliases for compatibility.
 GEMINI_MODELS = [
-    "gemini-2.5-flash",       # GA — recommended primary (March 2026)
-    "gemini-2.5-pro",         # GA — high-capability fallback
-    "gemini-2.5-flash-lite",  # GA — lightweight fallback
-    "gemini-2.0-flash",       # Still valid; retiring June 2026
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+    "gemini-pro-latest",
 ]
 GEMINI_FALLBACK_URLS = [
     f"{GEMINI_BASE_URL}/{model}:generateContent" for model in GEMINI_MODELS
@@ -91,7 +94,7 @@ def build_system_prompt(segment: str, portfolio: list) -> str:
 1.  **Segment Focus:** Your advice **MUST** be strictly tailored to the user's active segment: **'{segment}'**. All compliance rules, regulations, and recommendations must be relevant to this segment only. Do not discuss rules for other segments.
 2.  **2026 UK Compliance Baseline:** Follow current UK guidance with a **fabric-first** approach. Prioritise insulation and glazing upgrades (Part L alignment) before recommending mechanical systems (e.g., heat pumps), unless tool evidence proves a different order for a specific building.
 3.  **MEES Cost Cap:** For PRS/MEES upgrade planning, cite and use the **£10,000** cost cap (not £3,500).
-4.  **Regulatory Links (Mandatory):** When providing UK compliance advice, you **MUST** include relevant official references. For each regulation or standard cited, you **MUST** provide a valid, official external URL. Include these links when relevant:
+4.  **Regulatory Links (Mandatory):** When providing UK compliance advice, you **MUST** include relevant official references. Include these links when relevant:
     - EPC register: https://www.gov.uk/find-energy-certificate
     - MEES landlord guidance: https://www.gov.uk/guidance/domestic-private-rented-property-minimum-energy-efficiency-standard-landlord-guidance
     - Part L approved document: https://www.gov.uk/government/publications/conservation-of-fuel-and-power-approved-document-l
@@ -267,7 +270,10 @@ def execute_tool(
     buildings and scenarios are injected from the main app.
     Calls core.physics directly.
     """
-    temp = float(args.get("temperature_c", 10.5))
+    try:
+        temp = float(args.get("temperature_c", 10.5))
+    except (ValueError, TypeError):
+        temp = 10.5
     weather = {"temperature_c": temp, "wind_speed_mph": 9.2}
     calc = calculate_fn or physics.calculate_thermal_load
 
@@ -304,12 +310,14 @@ def execute_tool(
         if sname not in scenarios:
             return {"error": f"Scenario '{sname}' not found."}
         rows = []
+        errors = []
         for bname, bdata in buildings.items():
             try:
                 r = calc(
                     bdata, scenarios[sname], weather, tariff
                 )
-            except Exception:
+            except Exception as exc:
+                errors.append({"building": bname, "error": str(exc)})
                 continue
             cost = scenarios[sname]["install_cost_gbp"]
             rows.append({
@@ -325,12 +333,13 @@ def execute_tool(
                                       if cost > 0 else None,
             })
         rows.sort(key=lambda x: x["carbon_saving_t"], reverse=True)
-        return {"scenario": sname, "results": rows, "temperature_c": temp}
+        return {"scenario": sname, "results": rows, "temperature_c": temp, "calculation_errors": errors}
 
     # ── Tool: find_best_for_budget ────────────────────────────────────────────
     elif name == "find_best_for_budget":
         budget = float(args["budget_gbp"])
         candidates = []
+        errors = []
         for bname, bdata in buildings.items():
             for sname, sdata in scenarios.items():
                 if sdata["install_cost_gbp"] <= 0:
@@ -341,7 +350,8 @@ def execute_tool(
                     r = calc(
                         bdata, sdata, weather, tariff
                     )
-                except Exception:
+                except Exception as exc:
+                    errors.append({"building": bname, "scenario": sname, "error": str(exc)})
                     continue
                 if r["carbon_saving_t"] <= 0:
                     continue
@@ -358,13 +368,17 @@ def execute_tool(
                     ),
                 })
         if not candidates:
-            return {"error": f"No scenarios fit within £{budget:,.0f} budget."}
+            error_message = f"No scenarios fit within £{budget:,.0f} budget."
+            if errors:
+                error_message += " Some calculations also failed."
+            return {"error": error_message, "calculation_errors": errors}
         candidates.sort(key=lambda x: x["cost_per_tonne_co2"])
         return {
             "budget_gbp": budget,
             "top_recommendation": candidates[0],
             "all_options_ranked": candidates[:5],
             "temperature_c": temp,
+            "calculation_errors": errors,
         }
 
     # ── Tool: get_building_info ───────────────────────────────────────────────
@@ -397,12 +411,14 @@ def execute_tool(
         if bname not in buildings:
             return {"error": f"Building '{bname}' not found."}
         rows = []
+        errors = []
         for sname, sdata in scenarios.items():
             try:
                 r = calc(
                     buildings[bname], sdata, weather, tariff
                 )
-            except Exception:
+            except Exception as exc:
+                errors.append({"scenario": sname, "error": str(exc)})
                 continue
             cost = sdata["install_cost_gbp"]
             cpt = round(cost / max(r["carbon_saving_t"], 0.01), 1) if cost > 0 else None
@@ -427,6 +443,7 @@ def execute_tool(
             "building":  bname,
             "ranked_by": rank_by,
             "scenarios": rows,
+            "calculation_errors": errors,
         }
 
     elif name == "list_buildings":
@@ -441,7 +458,7 @@ def execute_tool(
 def _call_gemini(
     api_key: str,
     messages: list,
-    system_prompt: str = "",
+    system_prompt: str,
     use_tools: bool = True,
 ) -> dict:
     """
@@ -713,88 +730,3 @@ def run_agent_turn(
 
     # Summarisation itself failed — surface the error so the UI can display it
     return "Reached maximum reasoning steps. See tool results above."
-
-
-def run_agent(
-    api_key: str,
-    user_message: str,
-    conversation_history: list,
-    buildings: dict,
-    scenarios: dict,
-    calculate_fn=None,
-    current_context: dict | None = None,
-    tariff: float = constants.DEFAULT_ELECTRICITY_TARIFF_GBP_PER_KWH,
-) -> dict:
-    """
-    Agentic loop with dict return value for test compatibility.
-
-    Returns {"answer": str, "error": str|None, "loops": int}.
-    Calls _call_gemini(api_key, messages, use_tools) without a system prompt
-    so that unit tests can monkeypatch _call_gemini with a simplified signature.
-    """
-    calc = calculate_fn or physics.calculate_thermal_load
-    messages = list(conversation_history)
-    messages.append({"role": "user", "parts": [{"text": user_message}]})
-
-    loops = 0
-    while loops < MAX_AGENT_LOOPS:
-        loops += 1
-        response = _call_gemini(api_key, messages, use_tools=True)
-
-        if "error" in response:
-            return {"answer": "", "error": response["error"], "loops": loops}
-
-        candidates = response.get("candidates", [])
-        if not candidates:
-            return {"answer": "", "error": "No candidates in Gemini response", "loops": loops}
-
-        content = candidates[0].get("content", {})
-        parts = content.get("parts", [])
-
-        function_calls = [p for p in parts if "functionCall" in p]
-        text_parts = [p for p in parts if "text" in p]
-
-        if function_calls:
-            messages.append({"role": "model", "parts": parts})
-            function_results = []
-            for fc_part in function_calls:
-                fc = fc_part["functionCall"]
-                result = execute_tool(
-                    name=fc["name"],
-                    args=fc.get("args", {}),
-                    buildings=buildings,
-                    scenarios=scenarios,
-                    calculate_fn=calc,
-                    tariff=tariff,
-                )
-                function_results.append({
-                    "functionResponse": {
-                        "name": fc["name"],
-                        "response": {"result": result},
-                    }
-                })
-            messages.append({"role": "function", "parts": function_results})
-
-        elif text_parts:
-            text = " ".join(p["text"] for p in text_parts if p.get("text"))
-            messages.append({"role": "model", "parts": parts})
-            return {"answer": text.strip(), "error": None, "loops": loops}
-
-        else:
-            return {"answer": "", "error": "Unexpected response structure", "loops": loops}
-
-    # Max loops hit — attempt summarisation
-    messages.append({
-        "role": "user",
-        "parts": [{"text": "Please summarise your findings in 3 sentences."}],
-    })
-    final = _call_gemini(api_key, messages, use_tools=False)
-    if "error" in final:
-        return {
-            "answer": "",
-            "error": f"Max loops reached. Summarisation failed: {final['error']}",
-            "loops": loops,
-        }
-    parts = final.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-    text = " ".join(p.get("text", "") for p in parts)
-    return {"answer": text.strip(), "error": None, "loops": loops}
