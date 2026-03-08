@@ -30,10 +30,8 @@ st.set_page_config(
     page_title = "CrowAgent — Sustainability Intelligence",
     page_icon  = "assets/favicon.png",
     layout     = "wide",
-    initial_sidebar_state = "expanded",
+    initial_sidebar_state = "collapsed",
 )
-
-st.sidebar.image("assets/logo.png", use_container_width=True)
 
 st.markdown("""
 <style>
@@ -82,12 +80,12 @@ def _load_logo_uri() -> str:
     Searches CWD-relative asset paths so the loader works even when
     Streamlit copies the script to a temporary directory.
     """
-    return branding._load_asset_uri("CrowAgent_Logo_Horizontal_Dark.svg")
+    return branding._load_asset_uri("logo.png")
 
 
 def _load_icon_uri() -> str:
     """Return the square CrowAgent™ icon as a base64 data URI."""
-    return branding._load_asset_uri("CrowAgent_Icon_Square.svg")
+    return branding._load_asset_uri("favicon.png")
 
 
 def _add_building_from_json(json_str: str) -> tuple[bool, str]:

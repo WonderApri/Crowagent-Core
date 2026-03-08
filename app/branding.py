@@ -496,6 +496,16 @@ logger = logging.getLogger(__name__)
 
 def _load_asset_uri(filename: str) -> str:
     """Resolves an asset path and returns a base64-encoded data URI."""
+    ext = Path(filename).suffix.lower()
+    mime_map = {
+        ".svg":  "image/svg+xml",
+        ".png":  "image/png",
+        ".jpg":  "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif":  "image/gif",
+        ".webp": "image/webp",
+    }
+    mime = mime_map.get(ext, "image/png")
     candidate_paths = [
         Path("assets") / filename,
         Path("app/assets") / filename,
@@ -506,7 +516,7 @@ def _load_asset_uri(filename: str) -> str:
             with open(path, "rb") as f:
                 data = f.read()
             b64 = base64.b64encode(data).decode("utf-8")
-            return f"data:image/svg+xml;base64,{b64}"
+            return f"data:{mime};base64,{b64}"
     logger.warning(
         "Asset not found: %s. Searched: %s", filename, [str(p) for p in candidate_paths]
     )
@@ -516,13 +526,13 @@ def _load_asset_uri(filename: str) -> str:
 @st.cache_resource
 def get_logo_uri() -> str:
     """Returns the base64 data URI for the horizontal CrowAgent™ logo."""
-    return _load_asset_uri("CrowAgent_Logo_Horizontal_Dark.svg")
+    return _load_asset_uri("logo.png")
 
 
 @st.cache_resource
 def get_icon_uri() -> str:
     """Returns the base64 data URI for the square CrowAgent™ icon."""
-    return _load_asset_uri("CrowAgent_Icon_Square.svg")
+    return _load_asset_uri("favicon.png")
 
 
 # ── Injection helpers ────────────────────────────────────────────────────────
