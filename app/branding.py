@@ -636,10 +636,10 @@ def render_footer() -> None:
 
 
 # ── Streamlit page configuration ─────────────────────────────────────────────
-# Imported by main.py and passed directly to st.set_page_config().
+# Fallback page config values; main.py calls set_page_config() directly.
 PAGE_CONFIG = {
     "page_title": "CrowAgent™ Platform",
-    "page_icon": get_icon_uri() or "🌿",
+    "page_icon": "assets/favicon.png",
     "layout": "wide",
     "initial_sidebar_state": "collapsed",
     "menu_items": {

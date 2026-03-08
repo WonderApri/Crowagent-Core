@@ -35,8 +35,8 @@ crowagent-platform/
 │   └── config.toml                     # Unchanged
 │
 ├── assets/
-│   ├── CrowAgent_Logo_Horizontal_Dark.svg
-│   └── CrowAgent_Icon_Square.svg       # Unchanged
+│   ├── logo.png                        # CrowAgent™ horizontal logo
+│   └── favicon.png                     # CrowAgent™ square icon (browser tab)
 │
 ├── config/
 │   ├── __init__.py                     # NEW
