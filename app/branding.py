@@ -239,6 +239,9 @@ header[data-testid="stHeader"] > * { pointer-events: auto !important; }
 .footer-disclaimer { font-size:0.8rem; color:#8A9DB8; max-width:600px; line-height:1.6; margin-bottom:20px; }
 .footer-links { font-size:0.8rem; color:#8A9DB8; }
 
+/* ── Enterprise header ─────────────────────────────────────────────────── */
+.page-logo-bar a:hover { color: #0CC9A8 !important; }
+
 /* ── Validation Feedback ───────────────────────────────────────────────── */
 .val-err  { background:rgba(232,76,76,.08);  border-left:3px solid #E84C4C; padding:7px 12px; font-size:0.80rem; color:#E84C4C; border-radius:0 6px 6px 0; margin:6px 0; }
 .val-ok   { background:rgba(12,201,168,.08); border-left:3px solid #0CC9A8; padding:7px 12px; font-size:0.80rem; color:#0CC9A8; border-radius:0 6px 6px 0; margin:6px 0; }
@@ -378,30 +381,43 @@ div[data-testid="stStatusWidget"] { visibility: hidden; }
 
 /* ── Streamlit Native Element Theming ──────────────────────────────────── */
 
-/* Buttons */
+/* ── Nav bar container ─────────────────────────────────────────────────── */
+div[data-testid="stHorizontalBlock"]:has(button[data-testid="baseButton-primary"]) {
+  gap: 0 !important;
+}
+
+/* ── Buttons — general ─────────────────────────────────────────────────── */
 .stButton > button {
-  background: #0CC9A8 !important;
-  color: #05101E !important;
   font-family: 'Syne', sans-serif !important;
   font-weight: 700 !important;
+  font-size: 0.84rem !important;
+  letter-spacing: 0.02em !important;
+  border-radius: 8px !important;
+  transition: background 0.15s, color 0.15s, transform 0.15s !important;
+  box-shadow: none !important;
+}
+
+/* Primary = active nav or CTA */
+.stButton > button[kind="primary"] {
+  background: #0CC9A8 !important;
+  color: #05101E !important;
   border: none !important;
-  border-radius: 10px !important;
-  transition: background 0.2s, transform 0.15s !important;
 }
-.stButton > button:hover {
+.stButton > button[kind="primary"]:hover {
   background: #C2FF57 !important;
-  transform: translateY(-2px) !important;
+  transform: translateY(-1px) !important;
 }
+
+/* Secondary = inactive nav */
 .stButton > button[kind="secondary"] {
   background: transparent !important;
   color: #8A9DB8 !important;
-  border: 1px solid rgba(138,157,184,0.3) !important;
+  border: 1px solid transparent !important;
 }
 .stButton > button[kind="secondary"]:hover {
-  border-color: #0CC9A8 !important;
-  color: #0CC9A8 !important;
-  background: rgba(12,201,168,0.06) !important;
-  transform: translateY(-1px) !important;
+  color: #E4ECF7 !important;
+  background: rgba(228,236,247,0.06) !important;
+  border-color: rgba(138,157,184,0.2) !important;
 }
 
 /* Metrics */
@@ -567,62 +583,108 @@ def render_card(label: str, value: str, subtext: str, accent_class: str = "") ->
 
 
 def render_page_logo() -> None:
-    """Renders the CrowAgent™ logo banner at the top of the main content area.
-
-    Called at the start of every page wrapper to satisfy the Phase 4 branding
-    mandate: logo visible at the top of every page layout.
-    """
+    """Renders the enterprise header bar at the top of every page."""
     logo_uri = get_logo_uri()
-    if logo_uri:
-        st.markdown(
-            f"""
-            <div class="page-logo-bar" role="banner">
-                <img src="{logo_uri}" 
-                     style="height: 40px; 
-                            opacity: 0.95; 
-                            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));"
-                     alt="CrowAgent™ Platform Logo">
-                <div class="platform-name">CrowAgent™</div>
+    logo_img = (
+        f'<img src="{logo_uri}" style="height:36px;display:block;filter:brightness(0) invert(1);opacity:0.95;" alt="CrowAgent™">'
+        if logo_uri else
+        '<span style="font-family:\'Syne\',sans-serif;font-size:1.4rem;font-weight:800;color:#E4ECF7;">CrowAgent™</span>'
+    )
+    st.markdown(
+        f"""
+        <div class="page-logo-bar" role="banner">
+            <div style="display:flex;align-items:center;gap:14px;flex:1;">
+                {logo_img}
+                <div style="width:1px;height:28px;background:rgba(12,201,168,0.25);"></div>
+                <div>
+                    <div style="font-family:'Syne',sans-serif;font-size:0.68rem;font-weight:700;letter-spacing:0.25em;text-transform:uppercase;color:#8A9DB8;line-height:1;">PLATFORM</div>
+                    <div style="font-family:'Syne',sans-serif;font-size:1.05rem;font-weight:800;color:#E4ECF7;line-height:1.2;letter-spacing:-0.01em;">Sustainability Intelligence</div>
+                </div>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span class="sp sp-live"><span class="pulse-dot"></span>Live</span>
+                <span style="font-family:'Syne',sans-serif;font-size:0.72rem;font-weight:700;color:#3A5070;letter-spacing:0.05em;">v2.1.0</span>
+                <div style="width:1px;height:20px;background:rgba(12,201,168,0.15);"></div>
+                <a href="mailto:crowagent.platform@gmail.com" style="font-family:'Syne',sans-serif;font-size:0.78rem;font-weight:600;color:#8A9DB8;text-decoration:none;letter-spacing:0.03em;">Contact</a>
+                <a href="https://crowagent.ai" target="_blank" style="background:#0CC9A8;color:#05101E;font-family:'Syne',sans-serif;font-size:0.78rem;font-weight:700;padding:6px 14px;border-radius:6px;text-decoration:none;letter-spacing:0.03em;">crowagent.ai ↗</a>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_footer() -> None:
-    """Renders the enterprise footer at the bottom of the page.
-
-    Must be the final call in every page wrapper to ensure universal footer
-    presence across all 6 navigation pages.
-    """
+    """Renders the enterprise footer at the bottom of every page."""
     logo_uri = get_logo_uri()
     logo_img = (
-        f'<img src="{logo_uri}" '
-        f'style="height:32px; margin-bottom:16px; opacity:0.9;" '
-        f'alt="CrowAgent™">'
-        if logo_uri
-        else ""
+        f'<img src="{logo_uri}" style="height:30px;margin-bottom:14px;filter:brightness(0) invert(1);opacity:0.9;" alt="CrowAgent™">'
+        if logo_uri else ""
     )
     st.markdown(
         f"""
         <div class="ent-footer" role="contentinfo">
-            {logo_img}
-            <div class="footer-title">CrowAgent™</div>
-            <div class="footer-subtitle">
-                Sustainability AI Decision Intelligence Platform
-            </div>
-            <div class="footer-disclaimer">
-                ⚠️ <strong>Results Are Indicative Only.</strong> This platform
-                is a working prototype and uses simplified physics models.
-                Outputs should not be used as the sole basis for capital investment
-                decisions. Always consult a qualified energy surveyor.
-            </div>
-            <div class="footer-links">
-                © 2026 CrowAgent™. All rights reserved.
-                &nbsp;·&nbsp;
-                CrowAgent™ is a trademark of Aparajita Parihar. Registration pending.
-                &nbsp;·&nbsp;
-                Not licensed for commercial use.
+            <div style="width:100%;max-width:1100px;margin:0 auto;">
+                <!-- Top row: brand + columns -->
+                <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;margin-bottom:36px;text-align:left;">
+                    <!-- Brand -->
+                    <div>
+                        {logo_img}
+                        <div style="font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:800;color:#E4ECF7;letter-spacing:-0.02em;margin-bottom:8px;">CrowAgent™</div>
+                        <div style="font-size:0.82rem;color:#8A9DB8;line-height:1.7;max-width:260px;">
+                            Physics-Informed AI for UK building energy, emissions, and sustainability compliance.
+                        </div>
+                        <div style="margin-top:14px;">
+                            <span class="sp sp-live" style="font-size:0.72rem;"><span class="pulse-dot"></span>Platform Live</span>
+                        </div>
+                    </div>
+                    <!-- Platform -->
+                    <div>
+                        <div style="font-family:'Syne',sans-serif;font-size:0.70rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#0CC9A8;margin-bottom:14px;">Platform</div>
+                        <div style="display:flex;flex-direction:column;gap:10px;">
+                            <a href="https://crowagent.ai/#products" target="_blank" style="font-size:0.84rem;color:#8A9DB8;text-decoration:none;">Products</a>
+                            <a href="https://crowagent.ai/#how" target="_blank" style="font-size:0.84rem;color:#8A9DB8;text-decoration:none;">How It Works</a>
+                            <a href="https://crowagent.ai/#sectors" target="_blank" style="font-size:0.84rem;color:#8A9DB8;text-decoration:none;">Sectors</a>
+                            <a href="https://crowagent.ai/#security" target="_blank" style="font-size:0.84rem;color:#8A9DB8;text-decoration:none;">Security</a>
+                        </div>
+                    </div>
+                    <!-- Company -->
+                    <div>
+                        <div style="font-family:'Syne',sans-serif;font-size:0.70rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#0CC9A8;margin-bottom:14px;">Company</div>
+                        <div style="display:flex;flex-direction:column;gap:10px;">
+                            <a href="https://crowagent.ai/#about" target="_blank" style="font-size:0.84rem;color:#8A9DB8;text-decoration:none;">About</a>
+                            <a href="https://crowagent.ai/#vision" target="_blank" style="font-size:0.84rem;color:#8A9DB8;text-decoration:none;">Vision</a>
+                            <a href="mailto:crowagent.platform@gmail.com" style="font-size:0.84rem;color:#8A9DB8;text-decoration:none;">Contact</a>
+                            <a href="https://crowagent.ai/legal.html" target="_blank" style="font-size:0.84rem;color:#8A9DB8;text-decoration:none;">Legal</a>
+                        </div>
+                    </div>
+                    <!-- Compliance -->
+                    <div>
+                        <div style="font-family:'Syne',sans-serif;font-size:0.70rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#0CC9A8;margin-bottom:14px;">Compliance</div>
+                        <div style="display:flex;flex-direction:column;gap:10px;">
+                            <span style="font-size:0.84rem;color:#8A9DB8;">SECR</span>
+                            <span style="font-size:0.84rem;color:#8A9DB8;">TCFD</span>
+                            <span style="font-size:0.84rem;color:#8A9DB8;">UK SRS</span>
+                            <span style="font-size:0.84rem;color:#8A9DB8;">Environment Act 2021</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Divider -->
+                <div style="height:1px;background:rgba(12,201,168,0.12);margin-bottom:20px;"></div>
+                <!-- Bottom row -->
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+                    <div style="font-size:0.78rem;color:#3A5070;">
+                        © 2026 <span style="color:#8A9DB8;">CrowAgent Ltd</span>. Registered in England &amp; Wales. Company No. 17076461. Reading, RG1 6SP.
+                    </div>
+                    <div style="font-size:0.78rem;color:#3A5070;">
+                        CrowAgent™ is a trademark of Aparajita Parihar · Registration pending · Not licensed for commercial use
+                    </div>
+                </div>
+                <!-- Disclaimer -->
+                <div style="margin-top:14px;padding:12px 16px;background:rgba(194,255,87,0.04);border:1px solid rgba(194,255,87,0.12);border-radius:8px;font-size:0.76rem;color:#3A5070;line-height:1.65;text-align:left;">
+                    <strong style="color:#8A9DB8;">Results Are Indicative Only.</strong>
+                    This platform uses simplified physics models. Outputs must not be used as the sole basis for capital investment or procurement decisions. Always consult a qualified energy surveyor.
+                </div>
             </div>
         </div>
         """,

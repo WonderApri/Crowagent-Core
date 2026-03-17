@@ -136,36 +136,37 @@ _COMPLIANCE_TITLES: dict[str, str] = {
 # ── Shared page setup ────────────────────────────────────────────────────────
 
 def _render_page_nav() -> None:
-    """Horizontal in-content navigation bar with one button per page.
-
-    Uses session-state key `_current_page` for routing; the active page
-    button is rendered as type="primary", others as type="secondary".
-    Compliance title is resolved dynamically from the current segment.
-    """
+    """Horizontal enterprise navigation bar."""
     segment = st.session_state.get("user_segment", "")
     compliance_label = _COMPLIANCE_TITLES.get(segment, "Compliance")
     current = st.session_state.get("_current_page", "dashboard")
 
     _NAV_ITEMS = [
-        ("dashboard",  "📊", "Dashboard"),
-        ("financial",  "📈", "Financial Analysis"),
-        ("compliance", "🏛️", compliance_label),
-        ("ai_advisor", "🤖", "AI Advisor"),
-        ("settings",   "⚙️", "Settings"),
-        ("about",      "ℹ️", "About & Contact"),
+        ("dashboard",  "Dashboard"),
+        ("financial",  "Financial Analysis"),
+        ("compliance", compliance_label),
+        ("ai_advisor", "AI Advisor"),
+        ("settings",   "Settings"),
+        ("about",      "About & Contact"),
     ]
 
+    branding.render_html("""
+    <div style="background:#0A1F3A;border:1px solid rgba(12,201,168,0.12);border-radius:10px;padding:6px 8px;margin-bottom:20px;display:flex;gap:4px;">
+    """)
+
     cols = st.columns(len(_NAV_ITEMS))
-    for col, (key, icon, label) in zip(cols, _NAV_ITEMS):
+    for col, (key, label) in zip(cols, _NAV_ITEMS):
         with col:
             if st.button(
-                f"{icon} {label}",
+                label,
                 key=f"_nav_{key}",
                 use_container_width=True,
                 type="primary" if current == key else "secondary",
             ):
                 st.session_state["_current_page"] = key
                 st.rerun()
+
+    branding.render_html("</div>")
 
 
 def _page_setup() -> None:
