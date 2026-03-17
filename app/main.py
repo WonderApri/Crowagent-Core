@@ -33,19 +33,6 @@ st.set_page_config(
     initial_sidebar_state = "collapsed",
 )
 
-st.markdown("""
-<style>
-  .stApp { background-color: #05101E; }
-  section[data-testid="stSidebar"] { background-color: #0A1F3A !important; border-right: 1px solid rgba(12,201,168,0.15) !important; }
-  h1, h2, h3 { font-family: sans-serif !important; font-weight: 800 !important; color: #E4ECF7 !important; }
-  h2 { color: #0CC9A8 !important; }
-  .stButton > button { background-color: #0CC9A8 !important; color: #05101E !important; font-weight: 700 !important; border: none !important; border-radius: 10px !important; }
-  .stButton > button:hover { background-color: #C2FF57 !important; }
-  div[data-testid="stMetric"] { background-color: #0A1F3A !important; border: 1px solid rgba(12,201,168,0.15) !important; border-radius: 14px !important; padding: 20px !important; }
-  div[data-testid="stMetricValue"] { color: #0CC9A8 !important; font-weight: 800 !important; }
-  #MainMenu, footer, header { visibility: hidden; }
-</style>
-""", unsafe_allow_html=True)
 
 # ── Remaining imports (after set_page_config) ────────────────────────────────
 import app.tabs.dashboard as tab_dashboard
