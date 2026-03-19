@@ -30,7 +30,7 @@ jobs:
         run: pip install pytest-cov
 
       - name: Run tests with coverage
-        run: python -m pytest tests/ -v --tb=short --cov=core --cov=app --cov=services --cov=config --cov-report=term-missing
+        run: python -m pytest tests/ -v --tb=short --cov=core --cov=app --cov=services --cov=config --cov-report=term-missing --cov-fail-under=60
 
       - name: Upload test results (on failure)
         if: failure()
