@@ -466,24 +466,11 @@ def _call_gemini(
     Single Gemini API call with schema fallbacks for API-version differences.
     messages format: [{"role": "user"|"model", "parts": [...]}]
     """
-    # API Key validation and sanitization for debugging
+    # API Key validation and sanitization
     if not api_key or not isinstance(api_key, str):
-        print("--- GEMINI API DEBUG ---")
-        print("CRITICAL: API key is missing or not a string.")
-        print("--- END DEBUG ---")
         return {"error": "Gemini API key is missing."}
 
     clean_api_key = api_key.strip()
-    if len(clean_api_key) != 39:
-        print("--- GEMINI API DEBUG ---")
-        print(f"WARNING: API key length is {len(clean_api_key)}, expected 39. Key might be truncated.")
-        print(f"Key used: '{clean_api_key[:5]}...{clean_api_key[-4:]}'")
-        print("--- END DEBUG ---")
-    if not clean_api_key.startswith("AIza"):
-        print("--- GEMINI API DEBUG ---")
-        print("WARNING: API key does not start with 'AIza'. It may be invalid.")
-        print(f"Key prefix: '{clean_api_key[:4]}'")
-        print("--- END DEBUG ---")
 
     # Primary payload for REST API (camelCase keys required)
     payload_camel: dict = {
