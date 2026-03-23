@@ -468,22 +468,20 @@ def _call_gemini(
     """
     # API Key validation and sanitization for debugging
     if not api_key or not isinstance(api_key, str):
-        print("--- GEMINI API DEBUG ---")
-        print("CRITICAL: API key is missing or not a string.")
-        print("--- END DEBUG ---")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error("Gemini API key is missing or not a string.")
         return {"error": "Gemini API key is missing."}
 
     clean_api_key = api_key.strip()
     if len(clean_api_key) != 39:
-        print("--- GEMINI API DEBUG ---")
-        print(f"WARNING: API key length is {len(clean_api_key)}, expected 39. Key might be truncated.")
-        print(f"Key used: '{clean_api_key[:5]}...{clean_api_key[-4:]}'")
-        print("--- END DEBUG ---")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"API key length is {len(clean_api_key)}, expected 39. Key might be invalid.")
     if not clean_api_key.startswith("AIza"):
-        print("--- GEMINI API DEBUG ---")
-        print("WARNING: API key does not start with 'AIza'. It may be invalid.")
-        print(f"Key prefix: '{clean_api_key[:4]}'")
-        print("--- END DEBUG ---")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning("API key does not appear to be a valid Gemini key format.")
 
     # Primary payload for REST API (camelCase keys required)
     payload_camel: dict = {

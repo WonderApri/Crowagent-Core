@@ -506,7 +506,13 @@ logger = logging.getLogger(__name__)
 # ── Asset helpers ────────────────────────────────────────────────────────────
 
 def _load_asset_uri(filename: str) -> str:
-    """Resolves an asset path and returns a base64-encoded data URI."""
+    """Resolves an asset path and returns a base64-encoded data URI.
+    Prevents path traversal by validating filename doesn't contain path separators."""
+    # Security: prevent path traversal attacks
+    if "/" in filename or "\\" in filename or ".." in filename:
+        logger.error("Invalid asset filename (contains path separators): %s", filename)
+        return ""
+
     ext = Path(filename).suffix.lower()
     mime_map = {
         ".svg":  "image/svg+xml",
